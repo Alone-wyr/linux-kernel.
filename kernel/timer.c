@@ -1237,6 +1237,7 @@ SYSCALL_DEFINE1(alarm, unsigned int, seconds)
  *
  * This is SMP safe as current->tgid does not change.
  */
+ //不要去看这个名字，它的返回值是tgid。返回group_leader的pid值(tgid)
 SYSCALL_DEFINE0(getpid)
 {
 	return task_tgid_vnr(current);

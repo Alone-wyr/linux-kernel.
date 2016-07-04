@@ -225,6 +225,7 @@ static int newque(struct ipc_namespace *ns, struct ipc_params *params)
 static inline void ss_add(struct msg_queue *msq, struct msg_sender *mss)
 {
 	mss->tsk = current;
+	//设置为可中断的方式.
 	current->state = TASK_INTERRUPTIBLE;
 	list_add_tail(&mss->list, &msq->q_senders);
 }
@@ -251,6 +252,7 @@ static void ss_wakeup(struct list_head *h, int kill)
 	}
 }
 
+//唤醒所有等待读取数据的进程..参数res指定进程可以获取到的错误码.
 static void expunge_all(struct msg_queue *msq, int res)
 {
 	struct list_head *tmp;
@@ -262,8 +264,10 @@ static void expunge_all(struct msg_queue *msq, int res)
 		msr = list_entry(tmp, struct msg_receiver, r_list);
 		tmp = tmp->next;
 		msr->r_msg = NULL;
+		//要删除了这个msg队列，要唤醒所有等待消息的进程...
 		wake_up_process(msr->r_tsk);
 		smp_mb();
+		//设置错误码...
 		msr->r_msg = ERR_PTR(res);
 	}
 }
@@ -281,17 +285,22 @@ static void freeque(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp)
 	struct list_head *tmp;
 	struct msg_queue *msq = container_of(ipcp, struct msg_queue, q_perm);
 
+	//唤醒所有等待接收者..
 	expunge_all(msq, -EIDRM);
+	//唤醒所有等待发送者..
 	ss_wakeup(&msq->q_senders, 1);
+	//从idr中移除掉...
 	msg_rmid(ns, msq);
 	msg_unlock(msq);
 
+	//循环来释放掉还保存着的消息..(还没有被读取的).
 	tmp = msq->q_messages.next;
 	while (tmp != &msq->q_messages) {
 		struct msg_msg *msg = list_entry(tmp, struct msg_msg, m_list);
 
 		tmp = tmp->next;
 		atomic_dec(&ns->msg_hdrs);
+		//释放消息所占用的内存.
 		free_msg(msg);
 	}
 	atomic_sub(msq->q_cbytes, &ns->msg_bytes);
@@ -433,6 +442,7 @@ static int msgctl_down(struct ipc_namespace *ns, int msqid, int cmd,
 		goto out_unlock;
 
 	switch (cmd) {
+	//删除这个消息队列...
 	case IPC_RMID:
 		freeque(ns, ipcp);
 		goto out_up;
@@ -602,25 +612,32 @@ static inline int pipelined_send(struct msg_queue *msq, struct msg_msg *msg)
 	struct list_head *tmp;
 
 	tmp = msq->q_receivers.next;
+	//判断是否有进程在等待从该消息队列中读取msg.
 	while (tmp != &msq->q_receivers) {
 		struct msg_receiver *msr;
 
 		msr = list_entry(tmp, struct msg_receiver, r_list);
 		tmp = tmp->next;
+		//判断该消息是否有等待着需要.
 		if (testmsg(msg, msr->r_msgtype, msr->r_mode) &&
 		    !security_msg_queue_msgrcv(msq, msg, msr->r_tsk,
 					       msr->r_msgtype, msr->r_mode)) {
-
+			//有等待的接受者需要这个msg,因此把这个等待着从等待队列中移除.
 			list_del(&msr->r_list);
+			//msr->r_maxsize为等待者要存放消息的缓冲区大小..
 			if (msr->r_maxsize < msg->m_ts) {
 				msr->r_msg = NULL;
 				wake_up_process(msr->r_tsk);
 				smp_mb();
 				msr->r_msg = ERR_PTR(-E2BIG);
+				//没有像下面那样return,因此这个msg并没有被接受者读取到.而只是唤醒了进程返回了错误.
+				//如果没有找到，会执行到最后的return 0. 然后外面会添加到队列中去.
 			} else {
 				msr->r_msg = NULL;
 				msq->q_lrpid = task_pid_vnr(msr->r_tsk);
 				msq->q_rtime = get_seconds();
+				//先唤醒进程...然后设置了msg给等待进程..
+				//那不是可能进程执行了...但是r_msg还是没有被正确的设置?
 				wake_up_process(msr->r_tsk);
 				smp_mb();
 				msr->r_msg = msg;
@@ -651,6 +668,7 @@ long do_msgsnd(int msqid, long mtype, void __user *mtext,
 	if (IS_ERR(msg))
 		return PTR_ERR(msg);
 
+	//保存类型和大小..
 	msg->m_type = mtype;
 	msg->m_ts = msgsz;
 
@@ -670,28 +688,34 @@ long do_msgsnd(int msqid, long mtype, void __user *mtext,
 		err = security_msg_queue_msgsnd(msq, msg, msgflg);
 		if (err)
 			goto out_unlock_free;
-
+		//有对队列中已经存在的字节大小和消息的限制.
 		if (msgsz + msq->q_cbytes <= msq->q_qbytes &&
 				1 + msq->q_qnum <= msq->q_qbytes) {
 			break;
 		}
-
+		//队列满了..可能是因为大小超过。。也有可能是数目超过.
 		/* queue full, wait: */
 		if (msgflg & IPC_NOWAIT) {
 			err = -EAGAIN;
 			goto out_unlock_free;
 		}
+		//这里就是设置为可以wait的方式来发送.
+		//但是消息队列已经full，因此需要在发送队列上sleep.
 		ss_add(msq, &s);
 		ipc_rcu_getref(msq);
 		msg_unlock(msq);
+		//调度到其他进程，前面ss_add已经改变了进程的状态..
 		schedule();
-
+		
+		//该进程被唤醒的时候，就从这里继续往下执行...
 		ipc_lock_by_ptr(&msq->q_perm);
 		ipc_rcu_putref(msq);
+		//在睡眠期间，可能该队列已经被删除掉了..
 		if (msq->q_perm.deleted) {
 			err = -EIDRM;
 			goto out_unlock_free;
 		}
+		//从发送等待队列中删除掉.
 		ss_del(&s);
 
 		if (signal_pending(current)) {
@@ -705,9 +729,13 @@ long do_msgsnd(int msqid, long mtype, void __user *mtext,
 
 	if (!pipelined_send(msq, msg)) {
 		/* noone is waiting for this message, enqueue it */
+		//没有进程在等待该消息.那就放入到队列.
 		list_add_tail(&msg->m_list, &msq->q_messages);
+		//更新该队列存放的数据大小.
 		msq->q_cbytes += msgsz;
+		//更新队里的消息数目.
 		msq->q_qnum++;
+		//下面是更新整个ipc命名空间的字段.
 		atomic_add(msgsz, &ns->msg_bytes);
 		atomic_inc(&ns->msg_hdrs);
 	}
@@ -799,22 +827,32 @@ long do_msgrcv(int msqid, long *pmtype, void __user *mtext,
 			}
 			tmp = tmp->next;
 		}
+		//msg不为NULL..就代表遍历了消息队列发现可以让接受者得到的msg..
+		//上面的while只检查m_type，下面还需要检查大小等.
 		if (!IS_ERR(msg)) {
 			/*
 			 * Found a suitable message.
 			 * Unlink it from the queue.
 			 */
+			 //接受者的缓冲区太小.
 			if ((msgsz < msg->m_ts) && !(msgflg & MSG_NOERROR)) {
 				msg = ERR_PTR(-E2BIG);
 				goto out_unlock;
 			}
+			//到了这里代表可以获取该消息了..
+			//从队列中删除.
 			list_del(&msg->m_list);
+			//队列消息的num递减.
 			msq->q_qnum--;
 			msq->q_rtime = get_seconds();
 			msq->q_lrpid = task_tgid_vnr(current);
+			//队列的数据bytes也要递减.
 			msq->q_cbytes -= msg->m_ts;
+			//下面修改的是ipc命名空间的几个字段.
 			atomic_sub(msg->m_ts, &ns->msg_bytes);
 			atomic_dec(&ns->msg_hdrs);
+			//唤醒等待写入的进程..写入进程被阻塞的原因就是消息队列的数目或大小超过了限制..
+			//这里有其他进程接收了消息，那么就唤醒等待写入的进程。
 			ss_wakeup(&msq->q_senders, 0);
 			msg_unlock(msq);
 			break;
@@ -824,10 +862,14 @@ long do_msgrcv(int msqid, long *pmtype, void __user *mtext,
 			msg = ERR_PTR(-ENOMSG);
 			goto out_unlock;
 		}
+		//没有消息符合接受者所要的..而是是wait方式读取.
 		list_add_tail(&msr_d.r_list, &msq->q_receivers);
+		//初始化一些字段后，就调度到其他进程
 		msr_d.r_tsk = current;
 		msr_d.r_msgtype = msgtyp;
 		msr_d.r_mode = mode;
+		//如果设置MSG_NOERROR标记是为了说当得到的消息数据长度超过了设定的缓冲区大小不会发生错误
+		//而是直接截断超出的数据..超出的数据就丢失了.
 		if (msgflg & MSG_NOERROR)
 			msr_d.r_maxsize = INT_MAX;
 		else
@@ -855,6 +897,8 @@ long do_msgrcv(int msqid, long *pmtype, void __user *mtext,
 		 * wake_up_process(). There is a race with exit(), see
 		 * ipc/mqueue.c for the details.
 		 */
+		//可以查看pipelined_send函数可以知道..那边是先唤醒进程，然后设置msg的..
+		//msg的值不应该是为NULL的。。要么是错误码。要么是真的得到消息的地址。
 		msg = (struct msg_msg*)msr_d.r_msg;
 		while (msg == NULL) {
 			cpu_relax();
@@ -896,9 +940,10 @@ out_unlock:
 
 	msgsz = (msgsz > msg->m_ts) ? msg->m_ts : msgsz;
 	*pmtype = msg->m_type;
+	//那消息的数据从内核拷贝到应用层的缓冲区.
 	if (store_msg(mtext, msg, msgsz))
 		msgsz = -EFAULT;
-
+	//释放内核中分配的内存帧.
 	free_msg(msg);
 
 	return msgsz;

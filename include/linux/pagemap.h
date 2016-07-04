@@ -197,7 +197,14 @@ static inline int page_cache_add_speculative(struct page *page, int count)
 
 	return 1;
 }
+/*
+判断page->_count的值是不是等于count，如果是的话就设置为0.
+返回1，就代表设置为0了。
+返回0，代表没有设置。因为不相等。
 
+atomic_cmpxchg这个宏会返回之前page->_count的值..
+
+*/
 static inline int page_freeze_refs(struct page *page, int count)
 {
 	return likely(atomic_cmpxchg(&page->_count, count, 0) == count);
@@ -290,7 +297,18 @@ static inline loff_t page_offset(struct page *page)
 {
 	return ((loff_t)page->index) << PAGE_CACHE_SHIFT;
 }
-
+/*
+参数start就是在vma->vm_start 和vma->vm_end的线性区间内的..
+那么计算start对应pgoff的值等于多少，根据vma->pgoff的偏移量来计算
+然后返回该值..
+对于非线性的映射函数的调用:
+在外面会有个if条件语句在来判断是不是和start原本映射的pgoff偏移量
+相等，如果是相等的，就是说要不要进行非线性映射都一样的效果了。
+通过距离会更好的理解。假设vma->vm_start= 0,  vma->vm_end = 8192, 映射的文件偏移为vma_pgoff = 4096.
+现在需要非线性的映射, start = 4096, 然后映射的文件偏移量为8192.
+现在计算在start=4096时候VMA会映射到文件哪个偏移?就是等于(start - vma->vm_start) + vma_pgff = 8192..
+然后非线性映射的start映射到也是8192.最终的结果就是进行不进行非线性映射都没影响了
+*/
 static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
 					unsigned long address)
 {

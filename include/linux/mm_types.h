@@ -40,8 +40,12 @@ typedef unsigned long mm_counter_t;
 struct page {
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
+	//空闲的page的_count的值为0，而_mapcount的初始化设置为-1.
 	atomic_t _count;		/* Usage count, see below. */
 	union {
+		//表明共享该页位置的数目
+		//初始值为-1，在页插入到逆向映射数据结构时候设置为0
+		//页每次增加一个使用者，计时器加1.
 		atomic_t _mapcount;	/* Count of ptes mapped in mms,
 					 * to show when page is mapped
 					 * & limit reverse map searches.
@@ -53,6 +57,9 @@ struct page {
 	};
 	union {
 	    struct {
+		//如果设置了PageSwapCache,字段保存swp_entry_t，确定swap_area和slot.
+		//如果设置了PG_buddy，字段保存该page在伙伴系统的order..
+		//如果设置了PagePrivate，字段使用为buffer head.
 		unsigned long private;		/* Mapping-private opaque data:
 					 	 * usually used for buffer_heads
 						 * if PagePrivate set; used for
@@ -75,6 +82,7 @@ struct page {
 	    struct page *first_page;	/* Compound tail pages */
 	};
 	union {
+		//映射区域内的page offset.
 		pgoff_t index;		/* Our offset within mapping. */
 		void *freelist;		/* SLUB: freelist req. slab lock */
 	};
@@ -145,6 +153,9 @@ struct vm_area_struct {
 	 */
 	union {
 		struct {
+			//作为mapping->i_mmap_nonlinear的结点...
+			//vma_nonlinear_insert函数用来插入.
+			//list_del_init函数用来删除..
 			struct list_head list;
 			void *parent;	/* aligns with prio_tree_node parent */
 			struct vm_area_struct *head;
@@ -159,7 +170,9 @@ struct vm_area_struct {
 	 * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
 	 * or brk vma (with NULL file) can only be in an anon_vma list.
 	 */
+	//作为匿名区的链表结点..
 	struct list_head anon_vma_node;	/* Serialized by anon_vma->lock */
+	//指向anon_vma
 	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
 
 	/* Function pointers to deal with this struct. */
@@ -169,6 +182,7 @@ struct vm_area_struct {
 	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
 					   units, *not* PAGE_CACHE_SIZE */
 	struct file * vm_file;		/* File we map to (can be NULL). */
+	//要确定一下，这个字段的应用情景.
 	void * vm_private_data;		/* was vm_pte (shared mem) */
 	unsigned long vm_truncate_count;/* truncate_count or restart_addr */
 
@@ -201,11 +215,20 @@ struct mm_struct {
 	void (*unmap_area) (struct mm_struct *mm, unsigned long addr);
 	unsigned long mmap_base;		/* base of mmap area */
 	unsigned long task_size;		/* size of task vm space */
+	//如果不为0，那它代表着最大的洞，它的地址低于free_area_cache.....
 	unsigned long cached_hole_size; 	/* if non-zero, the largest hole below free_area_cache */
 	unsigned long free_area_cache;		/* first hole of size cached_hole_size or larger */
+
 	pgd_t * pgd;
+
+	//mm_count表示着多少进程使用着这个mm_struct..
+	//mm_user表示着多少个线程使用着这个mm_stuct..
+	//mm_count为零的时候需要把该mm_struct占用的内存释放掉...mm_user为0的时候mm_count不一定为0
+	//但是mm_user不为0的时候代表还有线程在使用它，那么mm_count至少>=1。
+	//具体解释参考ULK3的356页。
 	atomic_t mm_users;			/* How many users with user space? */
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
+	
 	int map_count;				/* number of VMAs */
 	struct rw_semaphore mmap_sem;
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
@@ -223,7 +246,8 @@ struct mm_struct {
 
 	unsigned long hiwater_rss;	/* High-watermark of RSS usage */
 	unsigned long hiwater_vm;	/* High-water virtual memory usage */
-
+	//locaked_vm: 标记为LOCKED标记的页面数目
+	//total_vm  : 总共映射了多少个页面。
 	unsigned long total_vm, locked_vm, shared_vm, exec_vm;
 	unsigned long stack_vm, reserved_vm, def_flags, nr_ptes;
 	unsigned long start_code, end_code, start_data, end_data;

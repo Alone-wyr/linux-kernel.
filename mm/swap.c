@@ -197,17 +197,21 @@ void activate_page(struct page *page)
 /*
  * Mark a page as having seen activity.
  *
- * inactive,unreferenced	->	inactive,referenced
- * inactive,referenced		->	active,unreferenced
- * active,unreferenced		->	active,referenced
+ * inactive,unreferenced	->	inactive,referenced				1.
+ * inactive,referenced		->	active,unreferenced			2.
+ * active,unreferenced		->	active,referenced			3.
  */
 void mark_page_accessed(struct page *page)
 {
 	if (!PageActive(page) && !PageUnevictable(page) &&
 			PageReferenced(page) && PageLRU(page)) {
+	//PageActive返回false, 同时PageReferenced返回true...-> 2.
+	//从inactice list 移动到 active list. 然后在把标记给清除..
 		activate_page(page);
 		ClearPageReferenced(page);
 	} else if (!PageReferenced(page)) {
+	//由条件PageActive返回为true..-> 3.
+	//由条件PageReferenced返回false.. -> 1.
 		SetPageReferenced(page);
 	}
 }
@@ -217,8 +221,10 @@ EXPORT_SYMBOL(mark_page_accessed);
 void __lru_cache_add(struct page *page, enum lru_list lru)
 {
 	struct pagevec *pvec = &get_cpu_var(lru_add_pvecs)[lru];
-
+	//相当于get_page，递增_count计数器..
 	page_cache_get(page);
+	//放入到每cpu的pagevec中去并返回剩余的可插入空间..
+	//返回0的时候代表满了，此时再去添加到lru链表上 。
 	if (!pagevec_add(pvec, page))
 		____pagevec_lru_add(pvec, lru);
 	put_cpu_var(lru_add_pvecs);
@@ -315,6 +321,7 @@ int lru_add_drain_all(void)
  * Batched page_cache_release().  Decrement the reference count on all the
  * passed pages.  If it fell to zero then remove the page from the LRU and
  * free it.
+ * 如果它下降到为0就需要把该页从LRU链表上remove掉，并且释放它.
  *
  * Avoid taking zone->lru_lock if possible, but if it is taken, retain it
  * for the remainder of the operation.
@@ -343,11 +350,14 @@ void release_pages(struct page **pages, int nr, int cold)
 			put_compound_page(page);
 			continue;
 		}
-
 		if (!put_page_testzero(page))
 			continue;
-
+		//前面会递减_count的计数器..只有返回值为1的时候才继续往下..
+		//那么只有_count的值原本为1的时候，才会让函数的值返回为1.因为1递减后为0，判断条件( 0 == 0)返回true.
+		//意思就是已经没有进程拥有了这个页框了.
+		
 		if (PageLRU(page)) {
+			//如果是在lru链表中.
 			struct zone *pagezone = page_zone(page);
 
 			if (pagezone != zone) {
@@ -358,11 +368,15 @@ void release_pages(struct page **pages, int nr, int cold)
 				spin_lock_irqsave(&zone->lru_lock, flags);
 			}
 			VM_BUG_ON(!PageLRU(page));
+			//清除标记.并从lru链表中remove掉..而且如果是从active_list中还需要清除PG_active标记.
 			__ClearPageLRU(page);
 			del_page_from_lru(zone, page);
 		}
-
+		//前面递减了计数器的值，但是并没有释放给伙伴系统..
+		//这里对需要释放的页框放到pages_to_free里面去，到时候会调用
+		//__pagevec_free来释放...
 		if (!pagevec_add(&pages_to_free, page)) {
+			//pages_to_free可以容纳的数目达到了上限...先把当前的给释放掉..
 			if (zone) {
 				spin_unlock_irqrestore(&zone->lru_lock, flags);
 				zone = NULL;
@@ -373,7 +387,7 @@ void release_pages(struct page **pages, int nr, int cold)
 	}
 	if (zone)
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
-
+	//释放前面确定的页框濉....
 	pagevec_free(&pages_to_free);
 }
 
@@ -422,16 +436,22 @@ void ____pagevec_lru_add(struct pagevec *pvec, enum lru_list lru)
 		VM_BUG_ON(PageActive(page));
 		VM_BUG_ON(PageUnevictable(page));
 		VM_BUG_ON(PageLRU(page));
+		//添加到LRU，设置PG_lru标记...
 		SetPageLRU(page);
+		//判断是添加到active/inactive和file/anon的LRU链表上..用来更新统计值.
 		active = is_active_lru(lru);
 		file = is_file_lru(lru);
+		//如果是active，那么还需要设置PG_active标记..
 		if (active)
 			SetPageActive(page);
 		update_page_reclaim_stat(zone, page, file, active);
+		//添加到对应的链表..
 		add_page_to_lru_list(zone, page, lru);
 	}
 	if (zone)
 		spin_unlock_irq(&zone->lru_lock);
+	//释放掉每cpu的pagevev...前面调用__lru_cache_addp这个函数添加到每cpu的pagevec的时候
+	//会进行age_cache_get递增...那么这里添加到LRU之后在递减掉...
 	release_pages(pvec->pages, pvec->nr, pvec->cold);
 	pagevec_reinit(pvec);
 }

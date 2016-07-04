@@ -144,14 +144,21 @@ struct swap_info_struct {
 	struct list_head extent_list;
 	struct swap_extent *curr_swap_extent;
 	unsigned short *swap_map;
+	
+	//扫描空闲页的时候会从lowest_bit和hightest_bit确定的范围查找..
+	//如果没有找到，那么就是分配失败了。它们两个的值是动态变化的.
 	unsigned int lowest_bit;
 	unsigned int highest_bit;
 	unsigned int lowest_alloc;	/* while preparing discard cluster */
 	unsigned int highest_alloc;	/* while preparing discard cluster */
+	//下次搜索空闲slot的起点.
 	unsigned int cluster_next;
 	unsigned int cluster_nr;
+	//spwa area中可用的pages，去掉了第一个slot和defective的slot.
 	unsigned int pages;
+	//记录着一个swap area的slots的个数..包含defective的).
 	unsigned int max;
+	//swap in 进来的page的数目。
 	unsigned int inuse_pages;
 	unsigned int old_block_size;
 };

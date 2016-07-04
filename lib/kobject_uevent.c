@@ -104,6 +104,7 @@ int kobject_uevent_env(struct kobject *kobj, enum kobject_action action,
 		 kobject_name(kobj), kobj, __func__);
 
 	/* search the kset we belong to */
+	/*找到这个kobj所属的kset.容器..一直往parent上找.*/
 	top_kobj = kobj;
 	while (!top_kobj->kset && top_kobj->parent)
 		top_kobj = top_kobj->parent;

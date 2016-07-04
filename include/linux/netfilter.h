@@ -215,7 +215,7 @@ __ret;})
 if ((__ret=nf_hook_thresh(pf, hook, (skb), indev, outdev, okfn, INT_MIN, cond)) == 1)\
 	__ret = (okfn)(skb);						       \
 __ret;})
-
+//pf指定协议类型...比如有ipv4 ipv6等..本文件53行定义的一个联合体...
 #define NF_HOOK(pf, hook, skb, indev, outdev, okfn) \
 	NF_HOOK_THRESH(pf, hook, skb, indev, outdev, okfn, INT_MIN)
 

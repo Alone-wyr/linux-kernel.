@@ -61,12 +61,14 @@ struct msg_msg *load_msg(const void __user *src, int len)
 
 	msg->next = NULL;
 	msg->security = NULL;
-
+	//首页的前面存放的是strcut msg_msg数据结构...
 	if (copy_from_user(msg + 1, src, alen)) {
 		err = -EFAULT;
 		goto out_err;
 	}
 
+	//如果text超过了DATALEN_MSG的大小.就需要分页存放,
+	//下面这个代码就是进行分页的处理的...
 	len -= alen;
 	src = ((char __user *)src) + alen;
 	pseg = &msg->next;
@@ -83,6 +85,7 @@ struct msg_msg *load_msg(const void __user *src, int len)
 		}
 		*pseg = seg;
 		seg->next = NULL;
+		//页前面存放着struct msg_msgseg数据结构.
 		if (copy_from_user(seg + 1, src, alen)) {
 			err = -EFAULT;
 			goto out_err;
@@ -135,7 +138,8 @@ void free_msg(struct msg_msg *msg)
 	struct msg_msgseg *seg;
 
 	security_msg_msg_free(msg);
-
+	//释放一个消息所占用的内存..
+	//为什么是这样..应该去参考在存入一个消息的时候内核是如何处理的..相关函数已经有解析注释了.
 	seg = msg->next;
 	kfree(msg);
 	while (seg != NULL) {

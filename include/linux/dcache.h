@@ -91,6 +91,8 @@ struct dentry {
 	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
 	int d_mounted;
+	
+	//指向inode结点...
 	struct inode *d_inode;		/* Where the name belongs to - NULL is
 					 * negative */
 	/*
@@ -110,6 +112,10 @@ struct dentry {
 	 	struct rcu_head d_rcu;
 	} d_u;
 	struct list_head d_subdirs;	/* our children */
+	
+	//一个文件可能会有多个链接...但是这个文件只会有1个inode...
+	//但是在内核中会有多个dentry..代表每个链接到这个文件..d_name就是文件的名字.
+	//同时还都会通过d_alias添加到inode的i_dentry的链表上作为结点..
 	struct list_head d_alias;	/* inode alias list */
 	unsigned long d_time;		/* used by d_revalidate */
 	const struct dentry_operations *d_op;

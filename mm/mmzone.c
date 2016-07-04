@@ -58,13 +58,21 @@ struct zoneref *next_zones_zonelist(struct zoneref *z,
 					nodemask_t *nodes,
 					struct zone **zone)
 {
+//highest_zone_ix 为要分配的最顶层内存区域, 
+//比如分配normal, 那么就是宏ZONE_NORMAL的值..但是比高珍贵的"dma"
+//也是可以分配的..
+//此外备用链表是按等级低到高的
+//2个结点, "HIGH_MEM 1, HIGH_MEM2, NORMAL1, NORMAL2, DMA1, DMA2"
+//1个结点, "HIGH_MEM, NORMAL1, DMA1"
+//
 	/*
 	 * Find the next suitable zone to use for the allocation.
 	 * Only filter based on nodemask if it's set
 	 */
 	if (likely(nodes == NULL))
 		while (zonelist_zone_idx(z) > highest_zoneidx)
-			z++;
+			z++; 
+		//等级越来越高,跳出while循环代表直到了同highest_zone_idx相等或更高级的内存域
 	else
 		while (zonelist_zone_idx(z) > highest_zoneidx ||
 				(z->zone && !zref_in_nodemask(z, nodes)))

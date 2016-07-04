@@ -1199,6 +1199,8 @@ struct task_struct {
 	 */
 	struct list_head children;	/* list of my children */
 	struct list_head sibling;	/* linkage in my parent's children list */
+	//线程组组长,如果它指向自身，那么就是进程或者是线程组组长.
+	//对于线程来说，它就是指向主线程咯。
 	struct task_struct *group_leader;	/* threadgroup leader */
 
 	/*
@@ -1224,6 +1226,8 @@ struct task_struct {
 
 	/* PID/PID hash table linkage. */
 	struct pid_link pids[PIDTYPE_MAX];
+	//如果是线程，该字段作为结点添加到主线程上。	
+	//主线程的thread_group相当于队列头...
 	struct list_head thread_group;
 
 	struct completion *vfork_done;		/* for vfork() */
@@ -1248,7 +1252,7 @@ struct task_struct {
 	const struct cred *cred;	/* effective (overridable) subjective task
 					 * credentials (COW) */
 	struct mutex cred_exec_mutex;	/* execve vs ptrace cred calculation mutex */
-
+	//保存该进程的文件名....
 	char comm[TASK_COMM_LEN]; /* executable name excluding path
 				     - access with [gs]et_task_comm (which lock
 				       it with task_lock())
@@ -2105,7 +2109,10 @@ static inline void setup_thread_stack(struct task_struct *p, struct task_struct 
 	*task_thread_info(p) = *task_thread_info(org);
 	task_thread_info(p)->task = p;
 }
-
+//计算stack的末端,知道栈是从高到低的,而联合体的底端是thread_info结构体
+//去掉thread_info的内存，剩下的就是stack的内存空间了.
+//因此stack的区间，假设task_thread_info(p)返回地址为x.
+// [x + sizeof(thread_info)  -  x + 2^THREAD_SIZE_ORDER]
 static inline unsigned long *end_of_stack(struct task_struct *p)
 {
 	return (unsigned long *)(task_thread_info(p) + 1);

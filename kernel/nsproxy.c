@@ -51,35 +51,35 @@ static struct nsproxy *create_new_namespaces(unsigned long flags,
 {
 	struct nsproxy *new_nsp;
 	int err;
-
+	//创建一个新的命名空间,并把old赋值给新分配的，设置引用count值为1.
 	new_nsp = clone_nsproxy(tsk->nsproxy);
 	if (!new_nsp)
 		return ERR_PTR(-ENOMEM);
-
+	//查看flag的CLONE_NEWNS标记，看是否设置新的mnt
 	new_nsp->mnt_ns = copy_mnt_ns(flags, tsk->nsproxy->mnt_ns, new_fs);
 	if (IS_ERR(new_nsp->mnt_ns)) {
 		err = PTR_ERR(new_nsp->mnt_ns);
 		goto out_ns;
 	}
-
+	//查看flag的CLONE_NEWUTS标记，看是否设置新的uts
 	new_nsp->uts_ns = copy_utsname(flags, tsk->nsproxy->uts_ns);
 	if (IS_ERR(new_nsp->uts_ns)) {
 		err = PTR_ERR(new_nsp->uts_ns);
 		goto out_uts;
 	}
-
+	//查看flag的CLONE_NEWIPC标记，看是否设置新的ipc
 	new_nsp->ipc_ns = copy_ipcs(flags, tsk->nsproxy->ipc_ns);
 	if (IS_ERR(new_nsp->ipc_ns)) {
 		err = PTR_ERR(new_nsp->ipc_ns);
 		goto out_ipc;
 	}
-
+	//查看flag的CLONE_NEWPID标记，看是否设置新的pid
 	new_nsp->pid_ns = copy_pid_ns(flags, task_active_pid_ns(tsk));
 	if (IS_ERR(new_nsp->pid_ns)) {
 		err = PTR_ERR(new_nsp->pid_ns);
 		goto out_pid;
 	}
-
+	//查看flag的CLONE_NEWNET标记，看是否设置新的net
 	new_nsp->net_ns = copy_net_ns(flags, tsk->nsproxy->net_ns);
 	if (IS_ERR(new_nsp->net_ns)) {
 		err = PTR_ERR(new_nsp->net_ns);
@@ -117,9 +117,9 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 
 	if (!old_ns)
 		return 0;
-
+	//old的命名空间递增.
 	get_nsproxy(old_ns);
-
+	//查看是不是要创建新的命令空间..查看各个标记.
 	if (!(flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
 				CLONE_NEWPID | CLONE_NEWNET)))
 		return 0;
@@ -148,7 +148,7 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	}
 
 	tsk->nsproxy = new_ns;
-
+//这里返回就是需要设置自己的命名空间，最后需要对old的命名空间的引用递减.
 out:
 	put_nsproxy(old_ns);
 	return err;

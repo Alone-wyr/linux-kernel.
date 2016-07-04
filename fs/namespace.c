@@ -1377,6 +1377,7 @@ static int attach_recursive_mnt(struct vfsmount *source_mnt,
 		if (err)
 			goto out;
 	}
+	//下面这个函数还不清楚是做什么..
 	err = propagate_mnt(dest_mnt, dest_dentry, source_mnt, &tree_list);
 	if (err)
 		goto out_cleanup_ids;
@@ -1392,6 +1393,8 @@ static int attach_recursive_mnt(struct vfsmount *source_mnt,
 		attach_mnt(source_mnt, path);
 		touch_mnt_namespace(parent_path->mnt->mnt_ns);
 	} else {
+	//设置挂载点还有上一级的文件系统mnt
+	//mnt_mountpoint/ mnt_parent 还有dest_dentry的d_mounted字段递增表示递增了一个挂载..
 		mnt_set_mountpoint(dest_mnt, dest_dentry, source_mnt);
 		commit_tree(source_mnt);
 	}
@@ -2056,7 +2059,7 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
 
 	BUG_ON(!ns);
 	get_mnt_ns(ns);
-
+	//判断是不是要创建自己的NS命名空间
 	if (!(flags & CLONE_NEWNS))
 		return ns;
 

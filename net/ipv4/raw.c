@@ -371,7 +371,8 @@ static int raw_send_hdrinc(struct sock *sk, void *from, size_t length,
 	if (iph->protocol == IPPROTO_ICMP)
 		icmp_out_count(net, ((struct icmphdr *)
 			skb_transport_header(skb))->type);
-
+		//这边就是数据包发送出去的函数吗?
+		//因为这里看到一个hook点...
 	err = NF_HOOK(PF_INET, NF_INET_LOCAL_OUT, skb, NULL, rt->u.dst.dev,
 		      dst_output);
 	if (err > 0)

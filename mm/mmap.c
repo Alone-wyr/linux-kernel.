@@ -195,6 +195,7 @@ static void __remove_shared_vm_struct(struct vm_area_struct *vma,
 {
 	if (vma->vm_flags & VM_DENYWRITE)
 		atomic_inc(&file->f_path.dentry->d_inode->i_writecount);
+	//字段 i_mmap_writable /* count VM_SHARED mappings */
 	if (vma->vm_flags & VM_SHARED)
 		mapping->i_mmap_writable--;
 
@@ -281,11 +282,12 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 			goto set_brk;
 		goto out;
 	}
-
+	//检查oldbrk - newbrk + PAGE_SIZE和当前的线性地址区间是不是会有覆盖。
+	//返回NULL代表没有覆盖。
 	/* Check against existing mmap mappings. */
 	if (find_vma_intersection(mm, oldbrk, newbrk+PAGE_SIZE))
 		goto out;
-
+	//在没有覆盖的情况下，才去执行do_brk操作。
 	/* Ok, looks good - let it rip. */
 	if (do_brk(oldbrk, newbrk-oldbrk) != oldbrk)
 		goto out;
@@ -359,6 +361,8 @@ find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 	rb_prev = __rb_parent = NULL;
 	vma = NULL;
 
+	//下面这个while循环和find_vma几乎一样，只是添加了一个rb_prev来记录上一个vma
+	//因此跳出while循环的时候，vma指向的是第一个vm_end大于addr的vma。
 	while (*__rb_link) {
 		struct vm_area_struct *vma_tmp;
 
@@ -371,16 +375,25 @@ find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 				break;
 			__rb_link = &__rb_parent->rb_left;
 		} else {
+			//rb_prev记录上一个..如果跳出了循环那rb_prev就是vma的前一个。。
 			rb_prev = __rb_parent;
 			__rb_link = &__rb_parent->rb_right;
 		}
 	}
 
 	*pprev = NULL;
+	//如果rb_prev不是NULL，那么就是上一个，保存到参数pprev
 	if (rb_prev)
 		*pprev = rb_entry(rb_prev, struct vm_area_struct, vm_rb);
 	*rb_link = __rb_link;
 	*rb_parent = __rb_parent;
+//通过分析知道了，返回的__rb_parent都是一个叶子结点.
+//而__rb_link的值为__rb_parent的结点对应的left或right字段的地址。
+//假设要插入一个A的话，直接 *__rb_link = A. A->parent = __rb_parent;
+//一个红黑结点有4个地址，至少有自身数据结构的地址,left字段的地址，right字段地址，还有parent地址(不过这里不去考虑)
+//假设数据结构地址a, right地址b, left地址c。然后返回的__rb_parent = a, __rb_link = b(right).
+//返回的话，那么该结点就是叶子结点。 A->parent = rb_parent , 这样指向了上一级的结点了
+//                                   *__rb_link = A，这样就添加到了结点的right那边了.
 	return vma;
 }
 
@@ -389,10 +402,14 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vm_area_struct *prev, struct rb_node *rb_parent)
 {
 	if (prev) {
+		//如果存在前面一个那么就直接插入...典型的链表插入动作。
 		vma->vm_next = prev->vm_next;
 		prev->vm_next = vma;
 	} else {
+		//如果没有前一个，那么就需要作为mmap字段的第一个结点...
 		mm->mmap = vma;
+		//如果没有parent，那就是当前的红黑树只有它一个叶子(也就是第一个vma数据结构啦.
+		//否则的话，它的下一个就是parent指定的vma结点。
 		if (rb_parent)
 			vma->vm_next = rb_entry(rb_parent,
 					struct vm_area_struct, vm_rb);
@@ -422,6 +439,8 @@ static void __vma_link_file(struct vm_area_struct *vma)
 			mapping->i_mmap_writable++;
 
 		flush_dcache_mmap_lock(mapping);
+		//作为非线性文件映射则让vma->shared.vm_set.list添加到mapping->i_mmap_nonlinear链表中
+		//且vma->shared.vm_set.parent = NULL;设置为NULL。
 		if (unlikely(vma->vm_flags & VM_NONLINEAR))
 			vma_nonlinear_insert(vma, &mapping->i_mmap_nonlinear);
 		else
@@ -435,7 +454,9 @@ __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *prev, struct rb_node **rb_link,
 	struct rb_node *rb_parent)
 {
+// 1.添加到链表
 	__vma_link_list(mm, vma, prev, rb_parent);
+// 2.添加到红黑树.
 	__vma_link_rb(mm, vma, rb_link, rb_parent);
 	__anon_vma_link(vma);
 }
@@ -486,8 +507,13 @@ static inline void
 __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vm_area_struct *prev)
 {
+//该函数是删除线性区vma...
+
+// 现在的操作是从链表上删除，很容易理解。
 	prev->vm_next = vma->vm_next;
+//从红黑树上删除。。
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
+//如果删除的vma正好是mmap_cache指向的，那就指向prev。。。
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
 }
@@ -514,15 +540,24 @@ void vma_adjust(struct vm_area_struct *vma, unsigned long start,
 
 	if (next && !insert) {
 		if (end >= next->vm_end) {
+			//到这里，那么至少是要remove掉一个VMA的。
+			//就看end到底能够覆盖掉多少个VMA了。
 			/*
 			 * vma expands, overlapping all the next, and
 			 * perhaps the one after too (mprotect case 6).
 			 */
+			 //查看移除的VMA个数...
+			 //对于case 1来说 remove_next = 1.
+			 //    case 6来说 remove_next = 2.
+			 //判断标记end > next->vm_end很重要.
+			 //如果是大于，那么就是完全覆盖，超过end。那么还不确定到底end覆盖掉多少个VMA，也许下一个也覆盖
+			 //如果是小于等于，那么就是等于1，代表只有这个next指定的VMA需要释放掉。
 again:			remove_next = 1 + (end > next->vm_end);
 			end = next->vm_end;
 			anon_vma = next->anon_vma;
 			importer = vma;
 		} else if (end > next->vm_start) {
+			//而这里，代表的是需要remove掉一个就好了。
 			/*
 			 * vma expands, overlapping part of the next:
 			 * mprotect case 5 shifting the boundary up.
@@ -531,15 +566,26 @@ again:			remove_next = 1 + (end > next->vm_end);
 			anon_vma = next->anon_vma;
 			importer = vma;
 		} else if (end < vma->vm_end) {
+			//这里是说，VMA收缩了。。。。
 			/*
 			 * vma shrinks, and !insert tells it's not
 			 * split_vma inserting another: so it must be
 			 * mprotect case 4 shifting the boundary down.
 			 */
+	/*这里非常奇怪...参考vma_merge函数里面说到的那个例子。[1 - 5) [10 - 20) 插入[3 - 10)
+	那么vma 指向区域[1-5], start = 1, end = 3.
+	vma->vm_end = 5 > 3，因此进入到这个if语句里面来了。
+	计算adjust_next = - (5 - 3) = -2..
+	在后面会调整下一个 next->start += adjust_next....那就是next->start = 10 + (-2) = 8.
+	实际上next->start应该等于3的。区间为[3 - 20)
+	*/
 			adjust_next = - ((vma->vm_end - end) >> PAGE_SHIFT);
 			anon_vma = next->anon_vma;
 			importer = next;
 		}
+		//还有一种情况就是, end < next->start。。那就只需要要扩展vma的线性区大小就好。
+		//不需要涉及到其他VMA的remove。
+		//如果是这种情况直接往下走。。
 	}
 
 	if (file) {
@@ -585,7 +631,7 @@ again:			remove_next = 1 + (end > next->vm_end);
 			__anon_vma_link(importer);
 		}
 	}
-
+	//root对于文件映射来说。
 	if (root) {
 		flush_dcache_mmap_lock(mapping);
 		vma_prio_tree_remove(vma, root);
@@ -597,6 +643,8 @@ again:			remove_next = 1 + (end > next->vm_end);
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
 	if (adjust_next) {
+		//因为是覆盖掉了VMA的部分，那么另外部分是被合并了。
+		//那么就需要修改start和pgoff字段了。
 		next->vm_start += adjust_next << PAGE_SHIFT;
 		next->vm_pgoff += adjust_next;
 	}
@@ -613,6 +661,7 @@ again:			remove_next = 1 + (end > next->vm_end);
 		 * vma_merge has merged next into vma, and needs
 		 * us to remove next before dropping the locks.
 		 */
+		 //把next从链表和红黑树中remove掉。
 		__vma_unlink(mm, next, vma);
 		if (file)
 			__remove_shared_vm_struct(next, file, mapping);
@@ -638,7 +687,9 @@ again:			remove_next = 1 + (end > next->vm_end);
 			if (next->vm_flags & VM_EXECUTABLE)
 				removed_exe_file_vma(mm);
 		}
+		//前面remove掉了next了，当前的VMA数目少了一个。
 		mm->map_count--;
+		//释放VMA数据结构占据的内存。
 		mpol_put(vma_policy(next));
 		kmem_cache_free(vm_area_cachep, next);
 		/*
@@ -647,6 +698,9 @@ again:			remove_next = 1 + (end > next->vm_end);
 		 * up the code too much to do both in one go.
 		 */
 		if (remove_next == 2) {
+			//代表需要释放的不仅仅一个VMA，现在next只想了下一个...然后重复前面的动作
+			//在释放掉已经覆盖的VMA。
+			//意思就是start-end的区间覆盖了多个VMA。因此需要释放掉多个VMA。
 			next = vma->vm_next;
 			goto again;
 		}
@@ -662,18 +716,28 @@ again:			remove_next = 1 + (end > next->vm_end);
  * If the vma has a ->close operation then the driver probably needs to release
  * per-vma resources, so we don't attempt to merge those.
  */
+ //VMA合并调用的函数:
+ //这里进行判断标记，然后如果是映射文件，在判断是不是同个文件。
+ //	就算是匿名映射，进行也判断标记，然后在比较文件，当然都是NULL咯。
 static inline int is_mergeable_vma(struct vm_area_struct *vma,
 			struct file *file, unsigned long vm_flags)
 {
+// 判断两个vma 的flash 是否相同
 	if ((vma->vm_flags ^ vm_flags) & ~VM_MERGEABLE_FLAGS)
 		return 0;
+//判断是不是同一个映射文件
 	if (vma->vm_file != file)
 		return 0;
+//有解释, 如果vma有close的操作,那么驱动很可能要释放
+//了这个vma了,所以我们不需要合并了。
 	if (vma->vm_ops && vma->vm_ops->close)
 		return 0;
 	return 1;
 }
-
+//VMA合并调用的函数:
+//这里进行判断是不是同一个匿名映射....匿名映射还需要在多了解一下。。。这里简单略过。。
+//返回0的情况，应该是确定两个annon_vma不相等，且不为NULL。
+//只要有一个不为NULL，就代表其中一个不是匿名映射，那么就该返回1.让上面那个函数去判断是不是相同的file。
 static inline int is_mergeable_anon_vma(struct anon_vma *anon_vma1,
 					struct anon_vma *anon_vma2)
 {
@@ -718,6 +782,8 @@ can_vma_merge_after(struct vm_area_struct *vma, unsigned long vm_flags,
 	    is_mergeable_anon_vma(anon_vma, vma->anon_vma)) {
 		pgoff_t vm_pglen;
 		vm_pglen = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
+		//映射的文件在文件内部是否连续的.
+		//如果为匿名映射，vm_pgoff参数在do_mmap_pgoff函数设置了addr>>PAGE_SHIFT..
 		if (vma->vm_pgoff + vm_pglen == vm_pgoff)
 			return 1;
 	}
@@ -766,18 +832,22 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 	 * We later require that vma->vm_flags == vm_flags,
 	 * so this tests vma->vm_flags & VM_SPECIAL, too.
 	 */
+//设置了该标记，代表不能和其他区域合并.
 	if (vm_flags & VM_SPECIAL)
 		return NULL;
-
+//prev为空的时候, next就是第一个vma.
 	if (prev)
 		next = prev->vm_next;
 	else
 		next = mm->mmap;
 	area = next;
+//next的end 和要添加的end一样，那么next 就再次指向下一个.
+//挺奇怪的，这样不就是代表有区间重合了嘛???
+//从do_mmap函数看过来的,start - end区间是不会和现存的线性区重叠的。待确定吧。
 	if (next && next->vm_end == end)		/* cases 6, 7, 8 */
 		next = next->vm_next;
 
-	/*
+	/*	是否可以和前一个VMA合并。
 	 * Can it merge with the predecessor?
 	 */
 	if (prev && prev->vm_end == addr &&
@@ -787,6 +857,12 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 		/*
 		 * OK, it can.  Can we now merge in the successor as well?
 		 */
+//case 1, 6:next的start和要添加的end重叠.
+//case 2, 5, 7: 不重叠.
+
+//貌似有点问题，当end == next->vm_start的时候是需要考虑和合并的VMA的标记等
+//但是当end > next->vm_start的时候，在vma_adjust会把next这个VMA的next->start-end之间的区域
+//进行合并的。但是好像并没有检测它的标记等信息。。。
 		if (next && end == next->vm_start &&
 				mpol_equal(policy, vma_policy(next)) &&
 				can_vma_merge_before(next, vm_flags,
@@ -796,19 +872,26 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 							/* cases 1, 6 */
 			vma_adjust(prev, prev->vm_start,
 				next->vm_end, prev->vm_pgoff, NULL);
-		} else					/* cases 2, 5, 7 */
+		} else					/* cases 2, 5, 7 */ 
 			vma_adjust(prev, prev->vm_start,
 				end, prev->vm_pgoff, NULL);
 		return prev;
 	}
 
-	/*
+	/*	是否可以和后一个VMA合并。
 	 * Can this new request be merged in front of next?
 	 */
 	if (next && end == next->vm_start &&
  			mpol_equal(policy, vma_policy(next)) &&
 			can_vma_merge_before(next, vm_flags,
 					anon_vma, file, pgoff+pglen)) {
+		//prev->vm_end > addr的话，就是已经覆盖到了前一个VMA了。
+		//这里也挺奇怪的,case 4，进去vma_adjust之后，调整了prev之后
+		//对next的调整好像也不对。。
+		//比如 prev: [1 - 5] next(area):[10 - 20] 要添加 [3 - 10)
+		//那需要调整第一个为[1 - 3) 然后第二个为[3 - 20)
+		//但是分析代码之后，只会设置[1-3) 对后面设置为[3 - 20)好像对不对。。
+		//具体进入到vma_adjust函数里面查看...
 		if (prev && addr < prev->vm_end)	/* case 4 */
 			vma_adjust(prev, prev->vm_start,
 				addr, prev->vm_pgoff, NULL);
@@ -822,6 +905,8 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 }
 
 /*
+该函数由anon_vma_prepare来调用，用来检查附近的vma是否有合适的anon_vma，在该函数进行
+分配一个新的anon_vma之前。
  * find_mergeable_anon_vma is used by anon_vma_prepare, to check
  * neighbouring vmas for a suitable anon_vma, before it goes off
  * to allocate a new anon_vma.  It checks because a repetitive
@@ -926,10 +1011,10 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	if ((prot & PROT_READ) && (current->personality & READ_IMPLIES_EXEC))
 		if (!(file && (file->f_path.mnt->mnt_flags & MNT_NOEXEC)))
 			prot |= PROT_EXEC;
-
+	//映射长度不应该为0.
 	if (!len)
 		return -EINVAL;
-
+	//MAP_FIXED宏就是映射区间必须由addr参数指定。
 	if (!(flags & MAP_FIXED))
 		addr = round_hint_to_min(addr);
 
@@ -937,6 +1022,7 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	if (error)
 		return error;
 
+	//len不为0，len也不应该超过TASK_SIZE的大下。
 	/* Careful about overflows.. */
 	len = PAGE_ALIGN(len);
 	if (!len || len > TASK_SIZE)
@@ -945,7 +1031,7 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	/* offset overflow? */
 	if ((pgoff + (len >> PAGE_SHIFT)) < pgoff)
                return -EOVERFLOW;
-
+	//map_count记录一个进程的VMA数目。
 	/* Too many mappings? */
 	if (mm->map_count > sysctl_max_map_count)
 		return -ENOMEM;
@@ -954,6 +1040,8 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	 * that it represents a valid section of the address space.
 	 */
 	addr = get_unmapped_area(file, addr, len, pgoff, flags);
+//如果不是页对齐的,,那么返回的addr 代表的就是错误码了
+//直接返回错误码给调用者.
 	if (addr & ~PAGE_MASK)
 		return addr;
 
@@ -969,7 +1057,7 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 			return -EPERM;
 		vm_flags |= VM_LOCKED;
 	}
-
+	//一个进程可以lock的页面是有限制的，检测是否超过了限制。
 	/* mlock MCL_FUTURE? */
 	if (vm_flags & VM_LOCKED) {
 		unsigned long locked, lock_limit;
@@ -980,7 +1068,7 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
 			return -EAGAIN;
 	}
-
+	//映射的可能是文件，也可能是匿名映射。
 	inode = file ? file->f_path.dentry->d_inode : NULL;
 
 	if (file) {
@@ -1024,6 +1112,7 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 			return -EINVAL;
 		}
 	} else {
+			//匿名映射...
 		switch (flags & MAP_TYPE) {
 		case MAP_SHARED:
 			/*
@@ -1117,13 +1206,16 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	/* Clear old maps */
 	error = -ENOMEM;
 munmap_back:
+	//这个函数很重要哈，它得到了VMA该链接到链表的位置..也得到了连接到红黑树的位置
+	//vma的返回值和find_vma函数一样。链表上第一个vma->vm_end大于start的VMA。
 	vma = find_vma_prepare(mm, addr, &prev, &rb_link, &rb_parent);
+	//判定是不是有重叠..如果有重叠就会出错咯。
 	if (vma && vma->vm_start < addr + len) {
 		if (do_munmap(mm, addr, len))
 			return -ENOMEM;
 		goto munmap_back;
 	}
-
+	//VMA映射的页面数目有限制的,,在totoal_vm字段。。
 	/* Check against address space limit. */
 	if (!may_expand_vm(mm, len >> PAGE_SHIFT))
 		return -ENOMEM;
@@ -1156,6 +1248,7 @@ munmap_back:
 	 * Can we just expand an old mapping?
 	 */
 	vma = vma_merge(mm, prev, addr, addr + len, vm_flags, NULL, file, pgoff, NULL);
+	//如果有进行了合并，那么不需要在创建新的VMA了。
 	if (vma)
 		goto out;
 
@@ -1189,12 +1282,15 @@ munmap_back:
 		}
 		vma->vm_file = file;
 		get_file(file);
+		//一般来说调用generic_file_mmap();
 		error = file->f_op->mmap(file, vma);
 		if (error)
 			goto unmap_and_free_vma;
 		if (vm_flags & VM_EXECUTABLE)
 			added_exe_file_vma(mm);
 	} else if (vm_flags & VM_SHARED) {
+		//匿名映射区，且VM_SHARED置位，一般就是用来进程间通信。。
+			//IPC shared memory.
 		error = shmem_zero_setup(vma);
 		if (error)
 			goto free_vma;
@@ -1211,7 +1307,7 @@ munmap_back:
 
 	if (vma_wants_writenotify(vma))
 		vma->vm_page_prot = vm_get_page_prot(vm_flags & ~VM_SHARED);
-
+	//添加到链表和红黑树....
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 	file = vma->vm_file;
 
@@ -1275,10 +1371,16 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 
 	if (flags & MAP_FIXED)
 		return addr;
-
+//参数addr为优先选择分配的地址..
 	if (addr) {
 		addr = PAGE_ALIGN(addr);
+//找到第一个vma->vm_end > addr的vm区域, 如果返回NULL
+//代表当前的vm区域中没有比addr 更大的地址.
 		vma = find_vma(mm, addr);
+//判断条件: 1. 确定选择的区域不会超过TASK_SIZE
+//				2.如果vma为NULL,那么代表addr ~ addr+len区域可以get
+//				3.vma非NULL, 确定要get的区域是不是会重叠
+//						addr + len <= vma->vm_start. 
 		if (TASK_SIZE - len >= addr &&
 		    (!vma || addr + len <= vma->vm_start))
 			return addr;
@@ -1306,6 +1408,7 @@ full_search:
 			}
 			return -ENOMEM;
 		}
+		//判断条件同上面优先选择addr 时候一样..
 		if (!vma || addr + len <= vma->vm_start) {
 			/*
 			 * Remember the place where we stopped the search:
@@ -1313,6 +1416,11 @@ full_search:
 			mm->free_area_cache = addr + len;
 			return addr;
 		}
+		//执行到这里代表, addr ~ addr+len 的区域会覆盖到
+		//vma->vm_start,因此不可以用,  此时记录addr  ~ vma->vm_start
+		//之间的长度作为hole 来记录下来
+		//然后会从低端地址开始遍历到高端地址, 最后会记录
+		//遍历到的最大的hole 记录下来.
 		if (addr + mm->cached_hole_size < vma->vm_start)
 		        mm->cached_hole_size = vma->vm_start - addr;
 		addr = vma->vm_end;
@@ -1460,6 +1568,7 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 EXPORT_SYMBOL(get_unmapped_area);
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
+//查找满足条件vma->end > addr的第一个vma。。
 struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 {
 	struct vm_area_struct *vma = NULL;
@@ -1544,14 +1653,18 @@ static int acct_stack_growth(struct vm_area_struct *vma, unsigned long size, uns
 	unsigned long new_start;
 
 	/* address space limit tests */
+	//grow是要增长的页数目，首先要判断是不是增长后会超过了限制。(一个进程可拥有的映射页数目)
 	if (!may_expand_vm(mm, grow))
 		return -ENOMEM;
 
 	/* Stack limit test */
+	//这里是对一个VMA的角度来说的,VMA的大小也有限制。
 	if (size > rlim[RLIMIT_STACK].rlim_cur)
 		return -ENOMEM;
 
 	/* mlock limit tests */
+	//如果这个VMA是有LOCKED标记的。那么也要判断增长了grow个LOCKD数目，是不是会超过
+	//进程对于LOCKED数目的限制。
 	if (vma->vm_flags & VM_LOCKED) {
 		unsigned long locked;
 		unsigned long limit;
@@ -1562,6 +1675,7 @@ static int acct_stack_growth(struct vm_area_struct *vma, unsigned long size, uns
 	}
 
 	/* Check to ensure the stack will not grow into a hugetlb-only region */
+	//一般情况下为DOWN的形式的stack，那么起点就是end - size。。
 	new_start = (vma->vm_flags & VM_GROWSUP) ? vma->vm_start :
 			vma->vm_end - size;
 	if (is_hugepage_only_range(vma->vm_mm, new_start, size))
@@ -1573,7 +1687,9 @@ static int acct_stack_growth(struct vm_area_struct *vma, unsigned long size, uns
 	 */
 	if (security_vm_enough_memory_mm(mm, grow))
 		return -ENOMEM;
-
+	//好了，到这里之后检测都通过了。
+	//VMA的线性区会扩大，扩大映射数目为grow指示了，那么改变相关字段
+	//total_mm和locked_vm..
 	/* Ok, everything looks good - let it rip */
 	mm->total_vm += grow;
 	if (vma->vm_flags & VM_LOCKED)
@@ -1638,6 +1754,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 /*
  * vma is the first one with address < vma->vm_start.  Have to extend vma.
  */
+ //这里要扩展VMA区域的线性区间，而且是对vma的start往前扩伸，参数start满足条件 start < vma->vm_start...
 static int expand_downwards(struct vm_area_struct *vma,
 				   unsigned long address)
 {
@@ -1666,12 +1783,14 @@ static int expand_downwards(struct vm_area_struct *vma,
 	/* Somebody else might have raced and expanded it already */
 	if (address < vma->vm_start) {
 		unsigned long size, grow;
-
+		//计算该vma区间的大小..
 		size = vma->vm_end - address;
+		//需要增长的大小(页大小为单位)	
 		grow = (vma->vm_start - address) >> PAGE_SHIFT;
 
 		error = acct_stack_growth(vma, size, grow);
 		if (!error) {
+			//返回0，代表增长是允许的。那么现在就修改VMA的线性区...
 			vma->vm_start = address;
 			vma->vm_pgoff -= grow;
 		}
@@ -1775,8 +1894,13 @@ static void unmap_region(struct mm_struct *mm,
 	lru_add_drain();
 	tlb = tlb_gather_mmu(mm, 0);
 	update_hiwater_rss(mm);
+	//下面这个函数释放start ~ end占据的页表项
 	unmap_vmas(&tlb, vma, start, end, &nr_accounted, NULL);
 	vm_unacct_memory(nr_accounted);
+	//下面这个函数释放掉要释放链表所插入到的链表或者是树
+	//比如匿名线性区的anon_vma(vma->anon_vma_node)
+	//    线性映射区的
+	//  非线性映射区的vma->shared.vm_set.list
 	free_pgtables(tlb, vma, prev? prev->vm_end: FIRST_USER_ADDRESS,
 				 next? next->vm_start: 0);
 	tlb_finish_mmu(tlb, start, end);
@@ -1876,14 +2000,18 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 {
 	unsigned long end;
 	struct vm_area_struct *vma, *prev, *last;
-
+	//如果start不是PAGE_SIZE对齐
+	//或者是大于TASK_SIZE
+	//或者是start + len超过了TASK_SIZE。
 	if ((start & ~PAGE_MASK) || start > TASK_SIZE || len > TASK_SIZE-start)
 		return -EINVAL;
-
+	//len也不应该为0。
 	if ((len = PAGE_ALIGN(len)) == 0)
 		return -EINVAL;
 
 	/* Find the first overlapping VMA */
+	//类似find_vma函数，同时返回前一个存放到prev变量中。。
+	//返回的是VMA链表中第一个满足条件vma_end > start的VMA.
 	vma = find_vma_prev(mm, start, &prev);
 	if (!vma)
 		return 0;
@@ -1915,6 +2043,7 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 		if (error)
 			return error;
 	}
+	//vma指向要开始释放的第一个memory region..
 	vma = prev? prev->vm_next: mm->mmap;
 
 	/*
@@ -1934,10 +2063,20 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 	/*
 	 * Remove the vma's, and unmap the actual pages
 	 */
+	//这个函数对红黑树，和链表进行操作。 由vma开始，vma指向要被unmap的第一个memory region.
+    //然后vma = vma->next来遍历链表来erase掉，直接条件vma->start > end。。
+    //需要注意的一点是，移除下来的VMA，还是组成一个链表的形式
+    //起点就是vma这个结点。
 	detach_vmas_to_be_unmapped(mm, vma, prev, end);
+	//这里就是移除掉和当前被删除的VMA相关页表项，和使无效TLB咯。
+	//还有从anon_vma或page_tree中移除咯,i_mmap_nonlinear和i_mmap链表/优先树..
+    //该函数没有进去分析，有待理解。
 	unmap_region(mm, vma, prev, start, end);
 
 	/* Fix up all other VM information */
+	//前面只是从list/rb tree中移除下来，并没有free掉内存
+    //而且前面也说过了,vma是移除下来的链表起点，下面
+    //这个函数进行对这个链表free掉它所占据的内存。
 	remove_vma_list(mm, vma);
 
 	return 0;
@@ -2147,11 +2286,16 @@ int insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
 		vma->vm_pgoff = vma->vm_start >> PAGE_SHIFT;
 	}
 	__vma = find_vma_prepare(mm,vma->vm_start,&prev,&rb_link,&rb_parent);
+	//返回的__vma是第一个vma链表上vma->end大于vma->vm_start的vma数据结构.
+	//因此现在要判断要插入的vma和返回的__vma的区域之间是否有重叠
+	//那就是判断vma的结束地址是不是超过了__vma的起始地址，如果超过了就是覆盖了。
 	if (__vma && __vma->vm_start < vma->vm_end)
 		return -ENOMEM;
 	if ((vma->vm_flags & VM_ACCOUNT) &&
 	     security_vm_enough_memory_mm(mm, vma_pages(vma)))
 		return -ENOMEM;
+	//通过find_vma_prepare函数，得到了应该插入到的链表的位置(prev)
+	//得到了插入到红黑树的位置(rb_link)
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 	return 0;
 }

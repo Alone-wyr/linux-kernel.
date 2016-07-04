@@ -190,6 +190,8 @@ static inline unsigned long scan_swap_map(struct swap_info_struct *si)
 	scan_base = offset = si->cluster_next;
 
 	if (unlikely(!si->cluster_nr--)) {
+		//当前可用的free slot(page)少于了SWAPFILE_CLUSTER的大小..那么重新设置
+		//cluster_nr后开始查找....
 		if (si->pages - si->inuse_pages < SWAPFILE_CLUSTER) {
 			si->cluster_nr = SWAPFILE_CLUSTER - 1;
 			goto checks;
@@ -210,6 +212,11 @@ static inline unsigned long scan_swap_map(struct swap_info_struct *si)
 		spin_unlock(&swap_lock);
 
 		/*
+		执行到这里代表当前的swap area的free slot(page)是大于SWAPFILE_CLUSTER的
+		但是可能并不能查找到连续数目SWAPFILE_CLUSTER的free slot的。
+		*/
+		
+		/*
 		 * If seek is expensive, start searching for new cluster from
 		 * start of partition, to minimize the span of allocated swap.
 		 * But if seek is cheap, search from our current position, so
@@ -220,15 +227,23 @@ static inline unsigned long scan_swap_map(struct swap_info_struct *si)
 		if (!(si->flags & SWP_SOLIDSTATE))
 			scan_base = offset = si->lowest_bit;
 		last_in_cluster = offset + SWAPFILE_CLUSTER - 1;
-
+		
+		/*
+		定义第一个空闲的cluster,这里的第一个是指从offset开始到最高的highest_bit之前的
+		free slot中查找
+		*/
 		/* Locate the first empty (unaligned) cluster */
 		for (; last_in_cluster <= si->highest_bit; offset++) {
 			if (si->swap_map[offset])
 				last_in_cluster = offset + SWAPFILE_CLUSTER;
 			else if (offset == last_in_cluster) {
+				//在这里找到一个空闲的cluster..
+	
 				spin_lock(&swap_lock);
+				//空闲的cluster的第一个free slot就是offset来指定..
 				offset -= SWAPFILE_CLUSTER - 1;
 				si->cluster_next = offset;
+				//代表着当前cluster的空闲数目.
 				si->cluster_nr = SWAPFILE_CLUSTER - 1;
 				found_free_cluster = 1;
 				goto checks;
@@ -241,7 +256,10 @@ static inline unsigned long scan_swap_map(struct swap_info_struct *si)
 
 		offset = si->lowest_bit;
 		last_in_cluster = offset + SWAPFILE_CLUSTER - 1;
-
+		/*
+		定义第一个空闲的cluster,这里的第一个是指从lowest_bit到offset(cluster_next)之前的
+		free slot中查找
+		*/
 		/* Locate the first empty (unaligned) cluster */
 		for (; last_in_cluster < scan_base; offset++) {
 			if (si->swap_map[offset])
@@ -259,7 +277,10 @@ static inline unsigned long scan_swap_map(struct swap_info_struct *si)
 				latency_ration = LATENCY_LIMIT;
 			}
 		}
-
+		/*
+		执行到这里就是代表着说，swap area是有超过SWAPFILE_CLUSTER个free slot但是它们并没有连续
+		的在一起，没有找到一个空闲的连续的SWAPFILE_CLUSTER个slot
+		*/
 		offset = scan_base;
 		spin_lock(&swap_lock);
 		si->cluster_nr = SWAPFILE_CLUSTER - 1;
@@ -273,9 +294,12 @@ checks:
 		goto no_page;
 	if (offset > si->highest_bit)
 		scan_base = offset = si->lowest_bit;
+	//scan_base和offset是从前面字段cluster_next得到的.
+	//这个字段描述下一次分配搜索起点，很可能是free的。内核尝试把分配的slot聚集在一起。
+	//避免在整个swap area到处的分散。
 	if (si->swap_map[offset])
 		goto scan;
-
+	//来到这里代表了offset指定的slot是free的。可以作为swap in的slot.
 	if (offset == si->lowest_bit)
 		si->lowest_bit++;
 	if (offset == si->highest_bit)
@@ -285,7 +309,9 @@ checks:
 		si->lowest_bit = si->max;
 		si->highest_bit = 0;
 	}
+	//记录整个slot已经被分配出来了.
 	si->swap_map[offset] = 1;
+	//下一次搜索的起点
 	si->cluster_next = offset + 1;
 	si->flags -= SWP_SCANNING;
 
@@ -346,6 +372,8 @@ checks:
 
 scan:
 	spin_unlock(&swap_lock);
+	//扫描找到未分配的slot的策略是往后分配..只有确定[cluster_next - highest_bit]
+	//没有了free slot在往[lowest_bit - cluster_next]中间查找.
 	while (++offset <= si->highest_bit) {
 		if (!si->swap_map[offset]) {
 			spin_lock(&swap_lock);
@@ -373,7 +401,15 @@ no_page:
 	si->flags -= SWP_SCANNING;
 	return 0;
 }
+/*
+该函数遍历每一个swap  area找到一个free slot然后组成page entry返回
+函数主要是调用了scan_swap_map，参数为swap area，它是在确定的一个交换区找free slot.
 
+所有的swap area通过链表swap_list 来遍历..
+此外也还需要知道所有的swap area存放在swap_info数组里面的。\
+
+swap_list是根据优先级从降序排列的。
+*/
 swp_entry_t get_swap_page(void)
 {
 	struct swap_info_struct *si;
@@ -385,7 +421,17 @@ swp_entry_t get_swap_page(void)
 	if (nr_swap_pages <= 0)
 		goto noswap;
 	nr_swap_pages--;
+	/*
+	swap_list的head指向了最高的priority的swap area,head不是链表结点，而是指swap_info的index。
+	通过这个index可以找到对应的swap area了，每个swap area由swap_info_struct数据结构描述,该数据结构
+	有个字段next，存放下一个priority的swap area在数组的index。注意的是下一个swap area的priority可能和
+	上一个相等..最后一个swap area数据结构的index字段存放负值..
 
+	首先从swap_list.next指向的swap area开始查找，然后在查看这个swap area的下一个交换区的priority和它
+	是不是相等。如果不相等则从头开始找(最高的优先等级)
+
+	另外一种情况进入到从最高优先级开始查找，就是next < 0，代表已经遍历完了swap_list了。那么就从头开始咯
+	*/
 	for (type = swap_list.next; type >= 0 && wrapped < 2; type = next) {
 		si = swap_info + type;
 		next = si->next;
@@ -399,11 +445,18 @@ swp_entry_t get_swap_page(void)
 			continue;
 		if (!(si->flags & SWP_WRITEOK))
 			continue;
-
+		/*
+		分配的时候会设置下次要分配的swap area,它是从最高优先级开始分配，但是可能最高优先级的已经
+		分配完了，那么需要设置这个next咯。它在释放的时候也会改变。比如说释放了一个slot，但是它所属
+		的swap area的优先级比next高，那么设置next为那个swap area。代表说更高优先级有空余的slot来分配
+		了
+		*/
 		swap_list.next = next;
 		offset = scan_swap_map(si);
 		if (offset) {
 			spin_unlock(&swap_lock);
+			//找到了free slot之后，确定了哪一个swap area(type)确定了哪一个free slot(offset)
+			//把它组成page entry..返回.
 			return swp_entry(type, offset);
 		}
 		next = swap_list.next;
@@ -484,6 +537,11 @@ static int swap_entry_free(struct swap_info_struct *p, swp_entry_t ent)
 				p->lowest_bit = offset;
 			if (offset > p->highest_bit)
 				p->highest_bit = offset;
+			/*
+			swap_list.next记录着下次要分配的swap area.
+			如果当前释放的slot所属的swap area的priority比链表指示的高，那么就设置
+			它为当前的swap area.
+			*/
 			if (p->prio > swap_info[swap_list.next].prio)
 				swap_list.next = p - swap_info;
 			nr_swap_pages++;
@@ -533,6 +591,9 @@ static inline int page_swapcount(struct page *page)
  * to it.  And as a side-effect, free up its swap: because the old content
  * on disk will never be read, and seeking back there to write new content
  * later would only waste time away from clustering.
+   还有另外一个作用，释放掉它的swap..因为在磁盘上旧的内容不会在被读取了，
+   如果把旧的数据读回，然后在写入新的数据，这样操作只会浪费时间咯。
+   因此，可以直接释放掉swap...
  */
 int reuse_swap_page(struct page *page)
 {
@@ -547,6 +608,8 @@ int reuse_swap_page(struct page *page)
 			SetPageDirty(page);
 		}
 	}
+	//返回值如果为true，代表只有一个进程引用了..
+	//为false，那就是不仅仅一个进程引用咯。
 	return count == 1;
 }
 
@@ -554,14 +617,22 @@ int reuse_swap_page(struct page *page)
  * If swap is getting full, or if there are no more mappings of this page,
  * then try_to_free_swap is called to free its swap space.
  */
+ /*
+	
+ */
 int try_to_free_swap(struct page *page)
 {
+	//调用函数delete_from_swap_cache有注释说，必须是PG_locked的标记..
 	VM_BUG_ON(!PageLocked(page));
-
+	//既然要从swap cache中删掉。。那至少该页是在swap cache中的。
 	if (!PageSwapCache(page))
 		return 0;
 	if (PageWriteback(page))
 		return 0;
+	//下面函数要判断是不是可以从swap cache中删除掉...
+	//其实就是返回swap_map[idx] - 1的值..当swap_map[idx] = 1的时候，返回0.
+	//那么就会调用下面的函数delete_from_swap_cache...swap_map[idx] = 1的含义是说
+	//该page只有swap cacae占有了..其他的进程都释放掉了.那么可以释放掉该内存页了..
 	if (page_swapcount(page))
 		return 0;
 
@@ -863,10 +934,16 @@ static int unuse_mm(struct mm_struct *mm,
  * Scan swap_map from current position to next entry still in use.
  * Recycle to start on reaching the end, returning 0 when empty.
  */
+ /*
+ 从当前位置(参数prev)还在使用的entry.
+ 如果找到结尾了，则在重新从头开始找到结束。返回0代表整个entry都是空的了.
+ 
+ */
 static unsigned int find_next_to_unuse(struct swap_info_struct *si,
 					unsigned int prev)
 {
-	unsigned int max = si->max;
+	//这个swap area最多的slot 数目。
+	unsigned int max = si->max; 
 	unsigned int i = prev;
 	int count;
 
@@ -878,6 +955,7 @@ static unsigned int find_next_to_unuse(struct swap_info_struct *si,
 	 */
 	for (;;) {
 		if (++i >= max) {
+			//当超过了最多的时候
 			if (!prev) {
 				i = 0;
 				break;
@@ -902,6 +980,7 @@ static unsigned int find_next_to_unuse(struct swap_info_struct *si,
  * and then search for the process using it.  All the necessary
  * page table adjustments can then be made atomically.
  */
+ //type作为参数来指定一个交换区..交换区数组swap_info...
 static int try_to_unuse(unsigned int type)
 {
 	struct swap_info_struct * si = &swap_info[type];
@@ -1160,21 +1239,27 @@ static void drain_mmlist(void)
  */
 sector_t map_swap_page(struct swap_info_struct *sis, pgoff_t offset)
 {
+	//搜索从上一次使用的链表元素开始..因为访问一般都是在相邻或相近..
 	struct swap_extent *se = sis->curr_swap_extent;
 	struct swap_extent *start_se = se;
 
 	for ( ; ; ) {
 		struct list_head *lh;
-
+		//page对应的是该区间的起始页..nr_pages代表该区间可以交换的页数目.
+		//start_block为该区间对应的起始块号。。
+		//此外需要注意的是，每个区间交换的页是连续的..在一个区间范围内.并且是页对齐的.
+		//假设页大小4K，块大小1K，那么区间内块的数目就是4对齐的。。因此才可以刚好平均给页。
 		if (se->start_page <= offset &&
 				offset < (se->start_page + se->nr_pages)) {
 			return se->start_block + (offset - se->start_page);
 		}
 		lh = se->list.next;
+		//因为是从半中间的区间开始搜索的..当到结尾的时候就从头开始.
 		if (lh == &sis->extent_list)
 			lh = lh->next;
 		se = list_entry(lh, struct swap_extent, list);
 		sis->curr_swap_extent = se;
+		//这里是结束条件..从start_se开始搜索...然后又到这里还没找到，就是BUG。
 		BUG_ON(se == start_se);		/* It *must* be present */
 	}
 }
@@ -1943,6 +2028,13 @@ void si_swapinfo(struct sysinfo *val)
  * Note: if swap_map[] reaches SWAP_MAP_MAX the entries are treated as
  * "permanent", but will be reclaimed by the next swapoff.
  */
+ /*需要注意的是，有点地方会调用这个函数来判断是不是slot已经释放了..
+ 这个函数的调用是因为一个page被多个进程引用，那么它交换到swap area的时候，只需要进行一次IO的操作
+ 就好了。其他的操作就是递增swap_map的次数而已。那么调用该函数的前提就是已经写入到swap area去了，这里
+ 只是递增次数。因此回去判断说swap_map的值。。
+ 
+ 如果为0，那就是它之前被释放了。。
+ */
 int swap_duplicate(swp_entry_t entry)
 {
 	struct swap_info_struct * p;
@@ -1951,16 +2043,20 @@ int swap_duplicate(swp_entry_t entry)
 
 	if (is_migration_entry(entry))
 		return 1;
-
+	//根据swp_type的返回值来定位到一个swap area...
 	type = swp_type(entry);
 	if (type >= nr_swapfiles)
 		goto bad_file;
 	p = type + swap_info;
+	//在确定swap area中的某个slot..
 	offset = swp_offset(entry);
 
 	spin_lock(&swap_lock);
+	//swap_map[offset]来得到这个slots多少个进程来共享..如果它为0，代表该slot为free的.
+	//等于0的时候就是出错的情况下，
 	if (offset < p->max && p->swap_map[offset]) {
 		if (p->swap_map[offset] < SWAP_MAP_MAX - 1) {
+			//添加共享该slot的计数。
 			p->swap_map[offset]++;
 			result = 1;
 		} else if (p->swap_map[offset] <= SWAP_MAP_MAX) {

@@ -69,6 +69,11 @@ void show_swap_cache_info(void)
  * add_to_swap_cache resembles add_to_page_cache_locked on swapper_space,
  * but sets SwapCache flag and private instead of mapping and index.
  */
+ /*
+ 		//1. 设置private的值为swap entry identification.
+		//2. 会设置flag有PageSwapCache标记
+		//3. 增加_count的计数值...
+*/
 int add_to_swap_cache(struct page *page, swp_entry_t entry, gfp_t gfp_mask)
 {
 	int error;
@@ -79,11 +84,16 @@ int add_to_swap_cache(struct page *page, swp_entry_t entry, gfp_t gfp_mask)
 
 	error = radix_tree_preload(gfp_mask);
 	if (!error) {
+		//增加page描述符的_count计数器
 		page_cache_get(page);
+		//设置标记PG_swapcache..
 		SetPageSwapCache(page);
+		//设置page描述符的private的值为换出标记符.
 		set_page_private(page, entry.val);
 
 		spin_lock_irq(&swapper_space.tree_lock);
+		//添加到radix tree..
+		//有可能发生错误，因为entry.val指定的位置已经有了指向page了.
 		error = radix_tree_insert(&swapper_space.page_tree,
 						entry.val, page);
 		if (likely(!error)) {
@@ -95,6 +105,10 @@ int add_to_swap_cache(struct page *page, swp_entry_t entry, gfp_t gfp_mask)
 		radix_tree_preload_end();
 
 		if (unlikely(error)) {
+		//下面是出错的处理,可以根据这些处理来知道插入到sawp cache对page的设置
+		//1. 设置private的值为swap entry identification.
+		//2. 会设置flag有PageSwapCache标记
+		//3. 增加_count的计数值...
 			set_page_private(page, 0UL);
 			ClearPageSwapCache(page);
 			page_cache_release(page);
@@ -112,9 +126,11 @@ void __delete_from_swap_cache(struct page *page)
 	VM_BUG_ON(!PageLocked(page));
 	VM_BUG_ON(!PageSwapCache(page));
 	VM_BUG_ON(PageWriteback(page));
-
+	//从radix tree移除出来.
 	radix_tree_delete(&swapper_space.page_tree, page_private(page));
+	//清除掉private存放的换出描述符.
 	set_page_private(page, 0);
+	//清除掉设置的PG_swapcache标记
 	ClearPageSwapCache(page);
 	total_swapcache_pages--;
 	__dec_zone_page_state(page, NR_FILE_PAGES);
@@ -129,6 +145,17 @@ void __delete_from_swap_cache(struct page *page)
  * Allocate swap space for the page and add the page to the
  * swap cache.  Caller needs to hold the page lock. 
  */
+ 
+ /*
+ 新添加一个页到swap cache..
+ 	1.分配一个free slot.(get_swap_cache函数).可以认为是对slot的引用递增1.
+	2.调用函数add_to_swap_cache
+		2.1 递增_count计数器
+		2.2 设置PG_swapcached标记
+		2.3 设置page.private为交换标识符.
+		2.3 insert到swapper_space的基树上.
+	3.设置PG_dirty标记.
+ */
 int add_to_swap(struct page *page)
 {
 	swp_entry_t entry;
@@ -138,6 +165,8 @@ int add_to_swap(struct page *page)
 	VM_BUG_ON(!PageUptodate(page));
 
 	for (;;) {
+		//获取一个free slot用来存放要换出的页框...
+		//entry可以确定存放的swap area和存放的slot索引值.
 		entry = get_swap_page();
 		if (!entry.val)
 			return 0;
@@ -158,6 +187,7 @@ int add_to_swap(struct page *page)
 
 		switch (err) {
 		case 0:				/* Success */
+			//设置为脏..因为这样shrink_list函数才会把该页写入到磁盘去..
 			SetPageDirty(page);
 			return 1;
 		case -EEXIST:
@@ -177,6 +207,18 @@ int add_to_swap(struct page *page)
  * been verified to be in the swap cache and locked.
  * It will never put the page into the free list,
  * the caller has a reference on the page.
+ * 该函数必须在验证了参数页框是在swap cache中并且被上锁了的才可以调用.
+ * 它不会把页放回到free_list的，因为调用者会先对该页进行了引用.(get_page).
+ */
+ /*
+ 当一个页框加入到swap cache的时候调用add_to_swap，可以参考加入的时候设置了什么。
+ 现在要删除的动作，就是要跟它相反。
+ 	1.调用函数__delete_from_swap_cache
+ 		1.1 从radix tree中remove掉.
+ 		1.2 清除掉private存放的换出描述符.
+ 		1.3 清除掉设置的PG_swapcache标记
+ 	2.递减slot的引用...(插入的时候调用get_swap_page相当于在递增).
+ 	3.递减_count的引用..
  */
 void delete_from_swap_cache(struct page *page)
 {
@@ -189,7 +231,9 @@ void delete_from_swap_cache(struct page *page)
 	spin_unlock_irq(&swapper_space.tree_lock);
 
 	mem_cgroup_uncharge_swapcache(page, entry);
+	//递减swap_map的计数.
 	swap_free(entry);
+	//递减_count计数器.
 	page_cache_release(page);
 }
 
@@ -265,6 +309,16 @@ struct page * lookup_swap_cache(swp_entry_t entry)
  * A failure return means that either the page allocation failed or that
  * the swap entry is no longer in use.
  */
+ /*
+ 该函数:read_swap_cache_async
+ 		//1. 设置flag有PageSwapBacked 标记
+		//2. 设置flag有PG_locked标记
+		//3. 对swap map的计数器递增1，表示对其引用.
+函数:add_to_swap_cache
+	 	//1. 设置private的值为swap entry identification.
+		//2. 会设置flag有PageSwapCache标记
+		//3. 增加_count的计数值...
+*/
 struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 			struct vm_area_struct *vma, unsigned long addr)
 {
@@ -277,14 +331,16 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		 * called after lookup_swap_cache() failed, re-calling
 		 * that would confuse statistics.
 		 */
+		//先在swap cache中查找...
 		found_page = find_get_page(&swapper_space, entry.val);
-		if (found_page)
+		if (found_page)	//如果得到，那么直接break....
 			break;
 
 		/*
 		 * Get a new page to read into from swap.
 		 */
 		if (!new_page) {
+			//否则分配一个新页来存放等下读取slot of swap area.
 			new_page = alloc_page_vma(gfp_mask, vma, addr);
 			if (!new_page)
 				break;		/* Out of memory */
@@ -293,6 +349,15 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		/*
 		 * Swap entry may have been freed since our caller observed it.
 		 */
+		/*
+		判断该页是否已经释放了，需要去看一下释放的过程如何处理，才能确定说这个函数就是来
+		判断的。因为这个函数其实就是递增swap_map的计数器..不过如果对应的slot的计数器为0，它会返回0.
+		更详细的进入函数查看。
+
+		这里面会递增swap_map的计数器，因为后面添加到swap cache中。。。在swap cache中也需要该引用..
+		函数获取当前swap cache引用的进程数目，page_swapcount..
+		可以看到要减掉1，然后返回。。因为放在swap cache中，它也有引用计数。
+		*/
 		if (!swap_duplicate(entry))
 			break;
 
@@ -311,10 +376,15 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 			/*
 			 * Initiate read into locked page and return.
 			 */
+			 //添加到lru链表上..这里面也会添加_count的计数器...
 			lru_cache_add_anon(new_page);
 			swap_readpage(NULL, new_page);
 			return new_page;
 		}
+		//一样，通过对错误的处理来判断进行异步读的时候做的处理..
+		//1. 设置flag有PageSwapBacked 标记
+		//2. 设置flag有PG_locked标记
+		//3. 对swap map的计数器递增1，表示对其引用.
 		ClearPageSwapBacked(new_page);
 		__clear_page_locked(new_page);
 		swap_free(entry);
@@ -359,6 +429,8 @@ struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	 * more likely that neighbouring swap pages came from the same node:
 	 * so use the same "addr" to choose the same node for each swap read.
 	 */
+	 //下面的读包含了预读的页数..
+	 //但是可能有发生错误，然后没有把目标页读取出来...
 	nr_pages = valid_swaphandles(entry, &offset);
 	for (end_offset = offset + nr_pages; offset < end_offset; offset++) {
 		/* Ok, do the async read-ahead now */
@@ -369,5 +441,7 @@ struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 		page_cache_release(page);
 	}
 	lru_add_drain();	/* Push any new pages onto the LRU now */
+	//专门调用一次从swap area中获取出来..因为上面可能出错导致说没有读取出来
+	//有时候这个步奏看起来就是有点多余.
 	return read_swap_cache_async(entry, gfp_mask, vma, addr);
 }

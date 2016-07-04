@@ -453,6 +453,10 @@ EXPORT_SYMBOL(filemap_write_and_wait_range);
  * This function is used to add a page to the pagecache. It must be locked.
  * This function does not add the page to the LRU.  The caller must do that.
  */
+ /*
+ 该函数用在于把页框添加到page cache。。。可以同添加到swap cache进行对比..
+ 它设置页框的   mapping  / index字段..而swap cache设置的字段会更多点...
+ */
 int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 		pgoff_t offset, gfp_t gfp_mask)
 {
@@ -467,6 +471,8 @@ int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 
 	error = radix_tree_preload(gfp_mask & ~__GFP_HIGHMEM);
 	if (error == 0) {
+		//递增_count的计数器，可见放入到page cache,它也指向该页框
+		//对于swap cache也是这样的。。会递增_count计数器..
 		page_cache_get(page);
 		page->mapping = mapping;
 		page->index = offset;
@@ -1486,32 +1492,41 @@ int filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		return VM_FAULT_SIGBUS;
 
 	/* If we don't want any read-ahead, don't bother */
+	//VM_RAND_READ设置，则跳过readahead...直接跳到下面.
 	if (VM_RandomReadHint(vma))
 		goto no_cached_page;
 
 	/*
 	 * Do we have something in the page cache already?
+	   先查看是否有在page cache里面...
 	 */
 retry_find:
+	//mapping->page_tree维持着radix tree..通过pgoff来寻找,pgoff代表文件的偏移量..
+	// 查看是否可以在page cache中查找到页框映射到该文件的pgoff处..
+	//根据mapping->page_tree所指向的radix tree.
 	page = find_lock_page(mapping, vmf->pgoff);
+	
 	/*
 	 * For sequential accesses, we use the generic readahead logic.
+	   对于顺序读，使用readahead的特性...预读机制..
 	 */
 	if (VM_SequentialReadHint(vma)) {
 		if (!page) {
 			page_cache_sync_readahead(mapping, ra, file,
 							   vmf->pgoff, 1);
 			page = find_lock_page(mapping, vmf->pgoff);
+			//如果再没有...跳转到下面..
 			if (!page)
 				goto no_cached_page;
 		}
+		//如果该页是预读到的,,那么再次进行异步调用读更多的页出来...
 		if (PageReadahead(page)) {
 			page_cache_async_readahead(mapping, ra, file, page,
 							   vmf->pgoff, 1);
 		}
 	}
-
 	if (!page) {
+		//到这里的话，读取是随机的..RANDOM...
 		unsigned long ra_pages;
 
 		ra->mmap_miss++;
@@ -1575,6 +1590,9 @@ no_cached_page:
 	 * We're only likely to ever get here if MADV_RANDOM is in
 	 * effect.
 	 */
+	 //很可能到这里的原因是标记MADV_RANDOM设置了..
+	 //否则的话，在前面会进行预读然后读取所需要的页框..
+	 //同时也会添加到page cache中去.
 	error = page_cache_read(file, vmf->pgoff);
 
 	/*
@@ -1638,7 +1656,9 @@ int generic_file_mmap(struct file * file, struct vm_area_struct * vma)
 	if (!mapping->a_ops->readpage)
 		return -ENOEXEC;
 	file_accessed(file);
+	//ops实现了fault函数..用在于非线性文件的映射调用的
 	vma->vm_ops = &generic_file_vm_ops;
+	//设置为该vma可以进行非线性文件映射的能力..
 	vma->vm_flags |= VM_CAN_NONLINEAR;
 	return 0;
 }

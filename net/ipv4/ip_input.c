@@ -264,7 +264,7 @@ int ip_local_deliver(struct sk_buff *skb)
 		if (ip_defrag(skb, IP_DEFRAG_LOCAL_DELIVER))
 			return 0;
 	}
-
+	//这边netfilter处理的是input 这个hook点咯...
 	return NF_HOOK(PF_INET, NF_INET_LOCAL_IN, skb, skb->dev, NULL,
 		       ip_local_deliver_finish);
 }
@@ -372,6 +372,7 @@ drop:
 
 /*
  * 	Main IP Receive routine.
+ 	ip数据包的接受程序.
  */
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
@@ -436,7 +437,11 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 
 	/* Remove any debris in the socket control block */
 	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
-
+	//从网络协议栈的数据转到netfilter模块中去处理...
+	//这里接收到的数据是还为路由前的...hook点为NF_INET_PRE_ROUTING...
+	//skb描述为数据包的数据和相关层的headers....dev为入口的接口...NULL为出口的设备...
+	//ip_recv_finish为hook点的函数处理完后要调用的函数....那确定了数据包达到netfilter后.
+	//是由netfilter直接处理掉..还是继续由网络栈的下一个层来处理(此时调用ip_recv_finish来转交给下一层).
 	return NF_HOOK(PF_INET, NF_INET_PRE_ROUTING, skb, dev, NULL,
 		       ip_rcv_finish);
 

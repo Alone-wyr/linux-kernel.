@@ -110,7 +110,11 @@ int ip_forward(struct sk_buff *skb)
 		ip_rt_send_redirect(skb);
 
 	skb->priority = rt_tos2priority(iph->tos);
-
+		//这里是处理挂载在forward点的hook函数...
+		//PF_INET确定了协议...NF_INET_FORWARD确定了forward的hook点..
+		//skb就是转发的数据包结构体..  skb->dev为该数据包的入口..
+		//rt->u.dst.dev为数据包的出口(通过路由表)来确定的.
+		//ip_forward_finish为交给下一层处理...当netfilter处理完数据包后..
 	return NF_HOOK(PF_INET, NF_INET_FORWARD, skb, skb->dev, rt->u.dst.dev,
 		       ip_forward_finish);
 

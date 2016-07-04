@@ -39,7 +39,12 @@ struct sysfs_dirent sysfs_root = {
 	.s_mode		= S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
 	.s_ino		= 1,
 };
-
+/*
+一般的文件系统获取超级块，就会从磁盘中读取超级块出来.
+但是sys文件系统是基于ram的。
+sysfs文件系统静态定义了sysfs_root，通过这个数据结构
+可以创建出root目录的inode和dentry.
+*/
 static int sysfs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct inode *inode;

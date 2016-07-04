@@ -302,7 +302,9 @@ int ip_output(struct sk_buff *skb)
 
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_IP);
-
+		//这边是iptables的output的 hook点...
+		//需要特别注意它调用的是COND的宏..是有条件来判断是否要将数据包送入到netfilter的..
+		//!(IPCB(skb)->flags & IPSKB_REROUTED)返回1..则需要进入netfilter.比较一个数据包不需要重新路由的情况下.
 	return NF_HOOK_COND(PF_INET, NF_INET_POST_ROUTING, skb, NULL, dev,
 			    ip_finish_output,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));

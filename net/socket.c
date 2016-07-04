@@ -1201,6 +1201,8 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 #endif
 
 	rcu_read_lock();
+//这里很重要...根据用户空间设置的family参数...然后获取到一个协议族pf....
+//因此也可以推倒出来。。协议族的注册实际上就是注册到该数组net_faimlies.
 	pf = rcu_dereference(net_families[family]);
 	err = -EAFNOSUPPORT;
 	if (!pf)
@@ -1215,7 +1217,8 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 
 	/* Now protected by module ref count */
 	rcu_read_unlock();
-
+//调用协议族的create的函数..而且要特别注意到参数protocol...
+//因此..要再去分析一下协议族的create函数
 	err = pf->create(net, sock, protocol);
 	if (err < 0)
 		goto out_module_put;
@@ -1263,6 +1266,7 @@ int sock_create_kern(int family, int type, int protocol, struct socket **res)
 	return __sock_create(&init_net, family, type, protocol, res, 1);
 }
 
+//socket_fd = socket(family,type,protocol);
 SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 {
 	int retval;
@@ -1282,11 +1286,13 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 
 	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
 		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
-
+	//下面函数主要就是返回了sock...
 	retval = sock_create(family, type, protocol, &sock);
 	if (retval < 0)
 		goto out;
-
+	//然后分配文件描述符...文件描述符可以得到sock.
+	//这个类似于文件系统内可以得到struct file..然后通过file得到sock
+	//file->private_data = sock;和sock->file = file;显示了它们之间的关系.
 	retval = sock_map_fd(sock, flags & (O_CLOEXEC | O_NONBLOCK));
 	if (retval < 0)
 		goto out_release;

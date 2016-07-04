@@ -458,6 +458,12 @@ static int __remove_mapping(struct address_space *mapping, struct page *page)
 	 * Note that if SetPageDirty is always performed via set_page_dirty,
 	 * and thus under tree_lock, then this ordering is not required.
 	 */
+	 /*
+	 判断page->_count的值是不是等于2，如果等于2，设置为0.并且返回1.
+	 否则不修改_count，同时返回0
+
+	 因此当_count等于2的时候才往下继续执行..同时设置_count的值为0.
+	 */
 	if (!page_freeze_refs(page, 2))
 		goto cannot_free;
 	/* note: atomic_cmpxchg in page_freeze_refs provides the smp_rmb */
@@ -653,6 +659,9 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		 * Anonymous process memory has backing store?
 		 * Try to allocate it some swap space here.
 		 */
+		/*
+		匿名页，且还没有在swap cache中..add_to_swap调用来添加到swap cache中....
+		*/
 		if (PageAnon(page) && !PageSwapCache(page)) {
 			if (!(sc->gfp_mask & __GFP_IO))
 				goto keep_locked;
@@ -752,7 +761,10 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				}
 			}
 		}
-
+		/*
+		__remove_mapping函数处理把页从page cache或者是swap cache的
+		radix tree中remove掉.
+		*/
 		if (!mapping || !__remove_mapping(mapping, page))
 			goto keep_locked;
 
@@ -766,6 +778,10 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		__clear_page_locked(page);
 free_it:
 		nr_reclaimed++;
+		/*
+		到这里就是可以把该页进行释放掉了..只是集中处理了一下...
+		函数__remove_mapping的时候可以看到page的_count的引用都是设置为0.
+		*/
 		if (!pagevec_add(&freed_pvec, page)) {
 			__pagevec_free(&freed_pvec);
 			pagevec_reinit(&freed_pvec);
@@ -861,6 +877,8 @@ int __isolate_lru_page(struct page *page, int mode, int file)
  * zone->lru_lock is heavily contended.  Some of the functions that
  * shrink the lists perform better by taking out a batch of pages
  * and working on them outside the LRU lock.
+ * zone->lru_lock有大量的竞争..一些函数会收缩链表，取出链表中一些pages.
+   
  *
  * For pagecache intensive workloads, this function is the hottest
  * spot in the kernel (apart from copy_*_user functions).
@@ -876,6 +894,10 @@ int __isolate_lru_page(struct page *page, int mode, int file)
  * @file:	True [1] if isolating file [!anon] pages
  *
  * returns how many pages were moved onto *@dst.
+ */
+ /*
+ 该函数从src链表上移动页到dst链表上...(src可以是active/inactive的链表..)
+ 需要移动的数目就是nr_to_scan参数指定..
  */
 static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		struct list_head *src, struct list_head *dst,
@@ -898,12 +920,14 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 
 		switch (__isolate_lru_page(page, mode, file)) {
 		case 0:
+		//移动到dst链表上...nr_taken记录着已经移动的页数目.
 			list_move(&page->lru, dst);
 			nr_taken++;
 			break;
 
 		case -EBUSY:
 			/* else it is being freed elsewhere */
+			//正在被其他地方进行释放...
 			list_move(&page->lru, src);
 			continue;
 
@@ -923,6 +947,15 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		 * where that page is in a different zone we will detect
 		 * it from its zone id and abort this block scan.
 		 */
+		/*
+		下面是因为有集中页面回收(order != 0)才继续执行的..
+		因为伙伴系统是是按阶来进行划分的，假设order = 2,那么页帧区间就是
+		[0 - 3] [4 - 7] [8 - 11] ....假设现在的page页编号为6，要进行集中回收
+		则需要查看[4 - 7]这4个页帧..通过page_to_pfn得到页编号..假设order = 2, page_pfn = 6.
+		pfn = 6 & ~((1 << 2) - 1) = 4.
+		end_pfn = 4 + (1 << 2) = 8.
+		判断条件是pfn < end_pfn ..因此遍历4, 5, 6, 7...
+		*/
 		zone_id = page_zone_id(page);
 		page_pfn = page_to_pfn(page);
 		pfn = page_pfn & ~((1 << order) - 1);
@@ -939,7 +972,7 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 				break;
 
 			cursor_page = pfn_to_page(pfn);
-
+			//不可以穿过其它的区域zone..
 			/* Check that we have not crossed a zone boundary. */
 			if (unlikely(page_zone_id(cursor_page) != zone_id))
 				continue;
@@ -954,6 +987,12 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 				/* else it is being freed elsewhere */
 				list_move(&cursor_page->lru, src);
 			default:
+		/*
+		没有在LRU链表上...
+		和前面的区别就是，前面的页帧是通过LRU的的末尾中获取到的..而现在的页帧是直接通过页编号
+		来获取页帧的。那么是否在链表上都不确定。如果不是，那么直接break掉..
+		可以看到，前面的分区如果是来到default的这个case，那就是BUG了。
+		*/
 				break;	/* ! on LRU or wrong list */
 			}
 		}
@@ -962,6 +1001,24 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 	*scanned = scan;
 	return nr_taken;
 }
+/*
+shrink_active_list函数:
+pgmoved = sc->isolate_pages(nr_pages, &l_hold, &pgscanned, sc->order,
+				ISOLATE_ACTIVE, zone,
+				sc->mem_cgroup, 1, file);
+				
+shrink_inactive_list函数:
+nr_taken = sc->isolate_pages(sc->swap_cluster_max,
+			     &page_list, &nr_scan, sc->order, mode,
+				zone, sc->mem_cgroup, 0, file);
+参数: nr :要扫描的数目...
+	 dst:移动到的局部链表.
+	 scanned: 输出参数.
+	 order: 为
+	 mem_cont:
+	 active: 移动的方向.
+	 file: 代表是不是文件映射的页
+*/
 
 static unsigned long isolate_pages_global(unsigned long nr,
 					struct list_head *dst,
@@ -975,6 +1032,7 @@ static unsigned long isolate_pages_global(unsigned long nr,
 		lru += LRU_ACTIVE;
 	if (file)
 		lru += LRU_FILE;
+	//根据参数确认操作的LRU链表...
 	return isolate_lru_pages(nr, &z->lru[lru].list, dst, scanned, order,
 								mode, !!file);
 }
@@ -1082,6 +1140,13 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		 *
 		 * We use the same threshold as pageout congestion_wait below.
 		 */
+		/*
+		mode的标记为ISOLATE_BOTH的结果就是当从LRU链表中remove掉页的时候，可以选择该页
+		是属于active或者是inactive..
+		isolate_pages不仅从LRU链表中remove掉页，并且还会进行回收集中回收。回收一个page相邻的页来
+		组成一个更大的连续页，那么相邻的页就可能是来自于active了。如果设置了ISOLATE_BOTH，就允许说
+		从active LRU上remove掉。。
+		*/
 		if (sc->order > PAGE_ALLOC_COSTLY_ORDER)
 			mode = ISOLATE_BOTH;
 		else if (sc->order && priority < DEF_PRIORITY - 2)
@@ -1090,6 +1155,8 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		nr_taken = sc->isolate_pages(sc->swap_cluster_max,
 			     &page_list, &nr_scan, sc->order, mode,
 				zone, sc->mem_cgroup, 0, file);
+		//前面函数解析过，但是应该注意可能move到局部的LRU中，会有包含来自于active LRU链表的页..
+		//下面就是遍历LRU，把是active LRU的页清楚PG_active标记。并返回属于active LRU的页数目..
 		nr_active = clear_active_flags(&page_list, count);
 		__count_vm_events(PGDEACTIVATE, nr_active);
 
@@ -1113,6 +1180,7 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		spin_unlock_irq(&zone->lru_lock);
 
 		nr_scanned += nr_scan;
+		//返回已经回收的页数目...
 		nr_freed = shrink_page_list(&page_list, sc, PAGEOUT_IO_ASYNC);
 
 		/*
@@ -1120,6 +1188,12 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		 * not reclaim everything in the list, try again and wait
 		 * for IO to complete. This will stall high-order allocations
 		 * but that should be acceptable to the caller
+		 */
+		 /*
+		 nr_freed < nr_taken代表说回收的页数目不完整...那么此时需要判断还不是因为kswapd守护
+		 进行来到这里，或者是因为分配不到内存而发起的页面回收..如果对于分配不到内存而发起的
+		 并且是请求多页页帧(PAGE_ALLOC_COSTLY_ORDER)，那么在此进行同步的方式进行回收一次。
+		 这样的缺点就是会比较耗时，但是对于分配多页页帧的情况是比较少的。
 		 */
 		if (nr_freed < nr_taken && !current_is_kswapd() &&
 					sc->order > PAGE_ALLOC_COSTLY_ORDER) {
@@ -1135,7 +1209,7 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 			nr_freed += shrink_page_list(&page_list, sc,
 							PAGEOUT_IO_SYNC);
 		}
-
+		//计数已经回收的页...
 		nr_reclaimed += nr_freed;
 		local_irq_disable();
 		if (current_is_kswapd()) {
@@ -1152,6 +1226,7 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		spin_lock(&zone->lru_lock);
 		/*
 		 * Put back any unfreeable pages.
+		 * 对于回收失败的页还存放在page_list链表中。。。
 		 */
 		while (!list_empty(&page_list)) {
 			int lru;
@@ -1230,9 +1305,16 @@ static void shrink_active_list(unsigned long nr_pages, struct zone *zone,
 	struct pagevec pvec;
 	enum lru_list lru;
 	struct zone_reclaim_stat *reclaim_stat = get_reclaim_stat(zone, sc);
-
+	//把lru缓存写回到LRU链表上.
 	lru_add_drain();
+	//因为对于zone->lru_lock是一个频繁获取的锁，如果占用长时间，就会降低系统的性能..
+	//因此，不会直接对LRU进行操作，而是把要操作的页从LRU上移动到一个局部的链表上。然后进行
+	//耗时的操作。这里就是放入到l_hold这个链表上。
+	
 	spin_lock_irq(&zone->lru_lock);
+	//移动LRU链表的页到l_hold的链表上..
+	//至于从哪个LRU上移动，根据倒数2个参数来确定,,一个代表active，一个代表file.
+	//这里的active = 1, file不确定..就是说从active链表上移动页数目..file来区分anon的还是file的..
 	pgmoved = sc->isolate_pages(nr_pages, &l_hold, &pgscanned, sc->order,
 					ISOLATE_ACTIVE, zone,
 					sc->mem_cgroup, 1, file);
@@ -1471,6 +1553,9 @@ static void shrink_zone(int priority, struct zone *zone,
 
 	get_scan_ratio(zone, sc, percent);
 
+	//计算扫描各个LRU链表上的数目...file/anon active/inactive..
+	//最后就是保存到nr这个数组里面咯...
+	//nr[LRU_INACTIVE_ANON], nr[LRU_ACTIVE_ANON], nr[LRU_INACTIVE_FILE], nr[LRU_ACTIVE_FILE]
 	for_each_evictable_lru(l) {
 		int file = is_file_lru(l);
 		unsigned long scan;
@@ -1497,7 +1582,7 @@ static void shrink_zone(int priority, struct zone *zone,
 			if (nr[l]) {
 				nr_to_scan = min(nr[l], swap_cluster_max);
 				nr[l] -= nr_to_scan;
-
+				//参数l,可以确定一个链表...nr_to_scan代表扫描的页数目..
 				nr_reclaimed += shrink_list(l, nr_to_scan,
 							    zone, sc, priority);
 			}
@@ -1606,6 +1691,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	unsigned long lru_pages = 0;
 	struct zoneref *z;
 	struct zone *zone;
+	//确定释放的区域...得到最高的index..回收的话都是回收低端内存DMA区域和NORMAL区域..
 	enum zone_type high_zoneidx = gfp_zone(sc->gfp_mask);
 
 	delayacct_freepages_start();
@@ -1620,7 +1706,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 
 			if (!cpuset_zone_allowed_hardwall(zone, GFP_KERNEL))
 				continue;
-
+		//遍历zonelist区域(DMA和NORMAL区域)上lru链表的page数目..
 			lru_pages += zone_lru_pages(zone);
 		}
 	}
@@ -1700,6 +1786,7 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	struct scan_control sc = {
 		.gfp_mask = gfp_mask,
 		.may_writepage = !laptop_mode,
+		//确定这次要释放的页面的数目...
 		.swap_cluster_max = SWAP_CLUSTER_MAX,
 		.may_unmap = 1,
 		.may_swap = 1,

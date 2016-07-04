@@ -480,14 +480,22 @@ static void __init alloc_init_pte(pmd_t *pmd, unsigned long addr,
 				  const struct mem_type *type)
 {
 	pte_t *pte;
-
+	//判断pmd表项是不是为空，那么就是需要分配页用来作为PTE表。
 	if (pmd_none(*pmd)) {
+		//在这里，伙伴系统还没有创建好。因此使用bootmem分配器来分配内存。
+		//对于ARM来说，每个页表项有2个，一个用来linux使用，一个用来arm硬件。
 		pte = alloc_bootmem_low_pages(2 * PTRS_PER_PTE * sizeof(pte_t));
+		//填充pmd表的pmd项。(物理地址 + 属性) 比如段、粗页、无效等。
 		__pmd_populate(pmd, __pa(pte) | type->prot_l1);
 	}
+	//在这里就是代表pmd表项指定的页表存在，现在就是填充pte项了.
+	//填充的地址区间为[addr - end].属性由type->prot_pte来确定.
 
+	//addr来找到第一个填充的pte项的地址...
+	//特别注意的是,pte为linux version的pte的地址。
 	pte = pte_offset_kernel(pmd, addr);
 	do {
+		//这个函数里面会设置linux version和hardware 的pte.
 		set_pte_ext(pte, pfn_pte(pfn, __pgprot(type->prot_pte)), 0);
 		pfn++;
 	} while (pte++, addr += PAGE_SIZE, addr != end);
@@ -497,6 +505,7 @@ static void __init alloc_init_section(pgd_t *pgd, unsigned long addr,
 				      unsigned long end, unsigned long phys,
 				      const struct mem_type *type)
 {
+	//对于ARM来说，没有PMD，那直接返回了pgd的地址。假装返回了PMD。
 	pmd_t *pmd = pmd_offset(pgd, addr);
 
 	/*
@@ -506,6 +515,7 @@ static void __init alloc_init_section(pgd_t *pgd, unsigned long addr,
 	 * up one logical pointer to an L2 table.
 	 */
 	if (((addr | end | phys) & ~SECTION_MASK) == 0) {
+		//段式映射.
 		pmd_t *p = pmd;
 
 		if (addr & SECTION_SIZE)
@@ -518,6 +528,7 @@ static void __init alloc_init_section(pgd_t *pgd, unsigned long addr,
 
 		flush_pmd_entry(p);
 	} else {
+		//页式映射.
 		/*
 		 * No need to loop; pte's aren't interested in the
 		 * individual L1 entries.
@@ -596,7 +607,7 @@ void __init create_mapping(struct map_desc *md)
 	unsigned long phys, addr, length, end;
 	const struct mem_type *type;
 	pgd_t *pgd;
-
+	//在用户空间，且不是异常向量表。那么不可以床架你映射。
 	if (md->virtual != vectors_base() && md->virtual < TASK_SIZE) {
 		printk(KERN_WARNING "BUG: not creating mapping for "
 		       "0x%08llx at 0x%08lx in user region\n",
@@ -624,7 +635,9 @@ void __init create_mapping(struct map_desc *md)
 	addr = md->virtual & PAGE_MASK;
 	phys = (unsigned long)__pfn_to_phys(md->pfn);
 	length = PAGE_ALIGN(md->length + (md->virtual & ~PAGE_MASK));
-
+	//描述为不使用段式映射，但是却是可以用段式映射的条件。那么就使用段式映射.
+	//addr / phys / length进行和段掩码与来判断是否使用段式映射。
+	//原则就是，可以使用段式映射，就不使用二级映射。
 	if (type->prot_l1 == 0 && ((addr | phys | length) & ~SECTION_MASK)) {
 		printk(KERN_WARNING "BUG: map for 0x%08lx at 0x%08lx can not "
 		       "be mapped using pages, ignoring.\n",
@@ -635,6 +648,8 @@ void __init create_mapping(struct map_desc *md)
 	pgd = pgd_offset_k(addr);
 	end = addr + length;
 	do {
+		//next的值为下一个pgd映射的虚拟地址，或是end。
+		//这样是要确定由PGD的页表项确定的PTE页表，需要映射的地址区间[addr - next].
 		unsigned long next = pgd_addr_end(addr, end);
 
 		alloc_init_section(pgd, addr, next, phys, type);

@@ -42,8 +42,12 @@ struct vfsmount {
 	struct dentry *mnt_mountpoint;	/* dentry of mountpoint */
 	struct dentry *mnt_root;	/* root of the mounted tree */
 	struct super_block *mnt_sb;	/* pointer to superblock */
+	
+	//一个文件系统下面，可能挂载了多个文件系统..那么就会把
+	//mnt_child作为结点添加到mnt_mounts作为链表头的链表上..
 	struct list_head mnt_mounts;	/* list of children, anchored here */
 	struct list_head mnt_child;	/* and going through their mnt_child */
+
 	int mnt_flags;
 	/* 4 bytes hole on 64bits arches */
 	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */

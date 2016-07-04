@@ -950,6 +950,8 @@ int get_sb_nodev(struct file_system_type *fs_type,
 		return error;
 	}
 	s->s_flags |= MS_ACTIVE;
+	//设置mnt的mnt_sb和mnt_root...并没有设置mnt_mountpoint作为根文件系统它没有挂载点咯..
+	//是最高的根了..
 	simple_set_mnt(mnt, s);
 	return 0;
 }
@@ -972,6 +974,12 @@ int get_sb_single(struct file_system_type *fs_type,
 	s = sget(fs_type, compare_single, set_anon_super, NULL);
 	if (IS_ERR(s))
 		return PTR_ERR(s);
+	/*
+	因为可能会有同1个文件系统，挂载到不同的挂载点上..那么其实是共用一个超级块的.
+	但是每次的挂载都会新创建一个vfs_mount..该结构存放挂载点咯..
+	通过sget返回的超级块，可能是已经存在的文件系统，也可能是第一次挂载..
+		s_root为空的情况就是首次挂载...
+	*/
 	if (!s->s_root) {
 		s->s_flags = flags;
 		error = fill_super(s, data, flags & MS_SILENT ? 1 : 0);
@@ -999,6 +1007,7 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 		return ERR_PTR(-ENODEV);
 
 	error = -ENOMEM;
+//分配一个vfsmount ....
 	mnt = alloc_vfsmnt(name);
 	if (!mnt)
 		goto out;
@@ -1012,16 +1021,21 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 		if (error)
 			goto out_free_secdata;
 	}
-
+//获取超级块..每个文件系统都会有一个超级块...
 	error = type->get_sb(type, flags, name, data, mnt);
 	if (error < 0)
 		goto out_free_secdata;
+//显然，超级块会被mnt_sb指向..
 	BUG_ON(!mnt->mnt_sb);
 
  	error = security_sb_kern_mount(mnt->mnt_sb, flags, secdata);
  	if (error)
  		goto out_sb;
-
+	/*
+	一般来说，后面会在调用函数do_add_mount，
+	这个函数会设置真正挂载的目录，和该目录所在文件系统的mnt数据结构...
+	现在只是临时的指向自己..
+	*/
 	mnt->mnt_mountpoint = mnt->mnt_root;
 	mnt->mnt_parent = mnt;
 	up_write(&mnt->mnt_sb->s_umount);

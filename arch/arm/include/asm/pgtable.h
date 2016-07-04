@@ -263,6 +263,8 @@ extern struct page *empty_zero_page;
 #define pte_none(pte)		(!pte_val(pte))
 #define pte_clear(mm,addr,ptep)	set_pte_ext(ptep, __pte(0), 0)
 #define pte_page(pte)		(pfn_to_page(pte_pfn(pte)))
+
+//下面这些宏返回的是linux version的pte地址...
 #define pte_offset_kernel(dir,addr)	(pmd_page_vaddr(*(dir)) + __pte_index(addr))
 #define pte_offset_map(dir,addr)	(pmd_page_vaddr(*(dir)) + __pte_index(addr))
 #define pte_offset_map_nested(dir,addr)	(pmd_page_vaddr(*(dir)) + __pte_index(addr))
@@ -332,6 +334,10 @@ static inline pte_t pte_mkspecial(pte_t pte) { return pte; }
 		clean_pmd_entry(pmdp);	\
 	} while (0)
 
+
+//特别注意，返回的是linux version的pte的地址....
+//一般在这个函数后面会调用set_pte_ext函数来设置pte。
+//这个函数会同时设置linux version和hardware的pte。
 static inline pte_t *pmd_page_vaddr(pmd_t pmd)
 {
 	unsigned long ptr;

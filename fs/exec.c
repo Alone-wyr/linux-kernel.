@@ -169,6 +169,7 @@ static struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
 			return NULL;
 	}
 #endif
+	//第4个参数len，为想要得到的页数目。。。。
 	ret = get_user_pages(current, bprm->mm, pos,
 			1, write, 1, &page, NULL);
 	if (ret <= 0)
@@ -250,6 +251,8 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 
 	mm->stack_vm = mm->total_vm = 1;
 	up_write(&mm->mmap_sem);
+	//设置这个p很重要的，解释为/* current top of mem */。指向的地址用来存放环境变量和参数。
+	//现在放了一个NULL，查看ULK 816的图表。。一个进程用户空间的布局laout.
 	bprm->p = vma->vm_end - sizeof(void *);
 	return 0;
 err:
@@ -431,7 +434,8 @@ static int copy_strings(int argc, char __user * __user * argv,
 
 			if (!kmapped_page || kpos != (pos & PAGE_MASK)) {
 				struct page *page;
-
+				//pos为线性地址，然后找到对应的vma可以找到page描述符, 
+				//第三个参数为1，代表可写。代表要向得到的page进行写操作...
 				page = get_arg_page(bprm, pos, 1);
 				if (!page) {
 					ret = -E2BIG;
@@ -448,6 +452,7 @@ static int copy_strings(int argc, char __user * __user * argv,
 				kpos = pos & PAGE_MASK;
 				flush_arg_page(bprm, kpos, kmapped_page);
 			}
+			//把kaddr+offset的地址的数据拷贝到str的地址去，传递的长度为bytes_to_copy
 			if (copy_from_user(kaddr+offset, str, bytes_to_copy)) {
 				ret = -EFAULT;
 				goto out;
@@ -467,6 +472,7 @@ out:
 /*
  * Like copy_strings, but get argv and its values from kernel memory.
  */
+ /*从内核空间中拷贝数据....*/
 int copy_strings_kernel(int argc,char ** argv, struct linux_binprm *bprm)
 {
 	int r;
@@ -658,7 +664,7 @@ struct file *open_exec(const char *name)
 	err = -EACCES;
 	if (!S_ISREG(file->f_path.dentry->d_inode->i_mode))
 		goto exit;
-
+	//判断该文件系统是否设置了MNT_NOEXEC标记，不允许执行程序。
 	if (file->f_path.mnt->mnt_flags & MNT_NOEXEC)
 		goto exit;
 
@@ -747,7 +753,7 @@ static int de_thread(struct task_struct *tsk)
 	struct sighand_struct *oldsighand = tsk->sighand;
 	spinlock_t *lock = &oldsighand->siglock;
 	int count;
-
+	//查看该任务是不是有thread_group,进程所有线程的列表.
 	if (thread_group_empty(tsk))
 		goto no_thread_group;
 
@@ -934,6 +940,7 @@ int flush_old_exec(struct linux_binprm * bprm)
 	 * Make sure we have a private signal table and that
 	 * we are unassociated from the previous thread group.
 	 */
+	//确保有私有信号表，并且和之前的进程组取消关联.
 	retval = de_thread(current);
 	if (retval)
 		goto out;
@@ -1071,7 +1078,7 @@ int prepare_binprm(struct linux_binprm *bprm)
 	umode_t mode;
 	struct inode * inode = bprm->file->f_path.dentry->d_inode;
 	int retval;
-
+	//现在是一些文件权限的检查。
 	mode = inode->i_mode;
 	if (bprm->file->f_op == NULL)
 		return -EACCES;
@@ -1104,7 +1111,7 @@ int prepare_binprm(struct linux_binprm *bprm)
 	if (retval)
 		return retval;
 	bprm->cred_prepared = 1;
-
+	//很重要的是这里，读取了文件的前面128字节放到了bprm->buf中去。
 	memset(bprm->buf, 0, BINPRM_BUF_SIZE);
 	return kernel_read(bprm->file, 0, bprm->buf, BINPRM_BUF_SIZE);
 }
@@ -1189,6 +1196,7 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 			if (!try_module_get(fmt->module))
 				continue;
 			read_unlock(&binfmt_lock);
+			//这里调用加载二进制文件,对ELF文件来说函数为load_elf_binary。
 			retval = fn(bprm, regs);
 			/*
 			 * Restore the depth counter to its starting value
@@ -1258,7 +1266,7 @@ int do_execve(char * filename,
 	struct files_struct *displaced;
 	bool clear_in_exec;
 	int retval;
-
+	//为进程复制一份文件表到displaced.
 	retval = unshare_files(&displaced);
 	if (retval)
 		goto out_ret;
@@ -1282,18 +1290,20 @@ int do_execve(char * filename,
 	if (retval < 0)
 		goto out_unlock;
 	clear_in_exec = retval;
-
+	//filename为要执行的二进制文件.
 	file = open_exec(filename);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		goto out_unmark;
-
+	//调用sched_exec()找到最小负载的CPU，用来执行该二进制文件。。
+	//没有进去查看，网上的解释.
 	sched_exec();
-
+	//好，设置文件，还有文件名
 	bprm->file = file;
 	bprm->filename = filename;
 	bprm->interp = filename;
-
+	//创建mm_struct数据结构，添加一个vma用来stack...
+	//well,create stack region of user mode.
 	retval = bprm_mm_init(bprm);
 	if (retval)
 		goto out_file;
@@ -1309,16 +1319,19 @@ int do_execve(char * filename,
 	retval = prepare_binprm(bprm);
 	if (retval < 0)
 		goto out;
-
+	/*下面可以查看到查看ULK 816的图表。。一个进程用户空间的布局laout.*/
+	//memory region layout of user space of process decried by ULK, P816.
+	
+	//从内核空间拷贝filename数据到bprm->p的地址.. p会向下移动。。
 	retval = copy_strings_kernel(1, &bprm->filename, bprm);
 	if (retval < 0)
 		goto out;
-
+	//从用户空间拷贝环境变量到bprm->p的地址..p会向下移动。
 	bprm->exec = bprm->p;
 	retval = copy_strings(bprm->envc, envp, bprm);
 	if (retval < 0)
 		goto out;
-
+	//从用户空间拷贝命令行参数到bprm->p的地址..p会向下移动。
 	retval = copy_strings(bprm->argc, argv, bprm);
 	if (retval < 0)
 		goto out;

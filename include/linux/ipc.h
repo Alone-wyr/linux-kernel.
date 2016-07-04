@@ -88,8 +88,11 @@ struct ipc_kludge {
 struct kern_ipc_perm
 {
 	spinlock_t	lock;
+	//删除一个消息队列的时候会设置该字段为1.
 	int		deleted;
+	//用户态调用的get之后会返回一个标识符回去就是该id。。因为可以认为用户态的key和这里的id是对应关系的.
 	int		id;
+	//存放用户态传递过来的key
 	key_t		key;
 	uid_t		uid;
 	gid_t		gid;

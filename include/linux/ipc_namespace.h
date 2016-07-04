@@ -15,12 +15,17 @@
 
 #define IPCNS_CALLBACK_PRI 0
 
-
+//管理消息队列的数据结构...
+//比如要添加一个，就需要从ipcs_idr中获取一个id号...
 struct ipc_ids {
 	int in_use;
 	unsigned short seq;
 	unsigned short seq_max;
+	//比如要添加一个新的队列..然后要查看是否有key冲突，那就需要先上锁..
+	//然后来去从idr中查找确定是否冲突.
 	struct rw_semaphore rw_mutex;
+	//idr存放的是struct kern_ipc_perm ...
+	//
 	struct idr ipcs_idr;
 };
 

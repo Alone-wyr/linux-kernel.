@@ -95,7 +95,10 @@ dev_t name_to_dev_t(char *name)
 		}
 		goto done;
 	}
-
+	/*
+	假设name = /dev/mtdblock2.
+	那 +5 就是递进到'm'，去掉了前面的/dev/
+	*/
 	name += 5;
 	res = Root_NFS;
 	if (strcmp(name, "nfs") == 0)
@@ -106,6 +109,7 @@ dev_t name_to_dev_t(char *name)
 
 	if (strlen(name) > 31)
 		goto fail;
+	//相当于把mtdblock2 拷贝到 s这个数组
 	strcpy(s, name);
 	for (p = s; *p; p++)
 		if (*p == '/')
@@ -190,7 +194,10 @@ __setup("rootdelay=", root_delay_setup);
 static void __init get_fs_names(char *page)
 {
 	char *s = page;
-
+	/*
+	root_fs_names存放u-boot传递过来的参数
+	比如: rootfstype=jffs2   ..
+	*/
 	if (root_fs_names) {
 		strcpy(page, root_fs_names);
 		while (*s++) {
@@ -381,7 +388,10 @@ void __init prepare_namespace(void)
 	wait_for_device_probe();
 
 	md_run_setup();
-
+	/*
+	字段存放根文件系统所在的设备文件名称。比如说通过u-boot传递过来的:
+	root=/dev/mtdblock2
+	*/
 	if (saved_root_name[0]) {
 		root_device_name = saved_root_name;
 		if (!strncmp(root_device_name, "mtd", 3) ||
@@ -389,9 +399,11 @@ void __init prepare_namespace(void)
 			mount_block_root(root_device_name, root_mountflags);
 			goto out;
 		}
+		//查看当前系统注册了的gendisk，比较名称...找到后就可以确定了设备号了..
 		ROOT_DEV = name_to_dev_t(root_device_name);
+		//是指向mtdblock2的...同saved_root_name还是有区别的。
 		if (strncmp(root_device_name, "/dev/", 5) == 0)
-			root_device_name += 5;
+			root_device_name += 5; 
 	}
 
 	if (initrd_load())

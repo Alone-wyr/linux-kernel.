@@ -17,10 +17,14 @@
 #define BITS_PER_PAGE		(PAGE_SIZE*8)
 
 struct pid_cache {
+	//存放该命名空间所在的level(level + 1)
 	int nr_ids;
+	//该缓存(slab)的名称..
 	char name[16];
+	//分配一个cache缓存，用来分配该命名空间的缓存(slab)
 	struct kmem_cache *cachep;
-	struct list_head list;
+	//作为结点添加到链表  pid_caches_lh
+	struct list_head list;	
 };
 
 static LIST_HEAD(pid_caches_lh);
@@ -47,6 +51,9 @@ static struct kmem_cache *create_pid_cachep(int nr_ids)
 		goto err_alloc;
 
 	snprintf(pcache->name, sizeof(pcache->name), "pid_%d", nr_ids);
+	//分配pid数据结构，它是不固定大小的.因为所在不同的level的用户空间..参数nr_ids指定了所在的level(+1)
+	//因此在分配数据结构时候大小为,sizeof(struct pid) + (nr_ids - 1) * sizeof(struct upid).
+	//struct upid会对应到每一个命名空间.
 	cachep = kmem_cache_create(pcache->name,
 			sizeof(struct pid) + (nr_ids - 1) * sizeof(struct upid),
 			0, SLAB_HWCACHE_ALIGN, NULL);
@@ -71,22 +78,22 @@ static struct pid_namespace *create_pid_namespace(unsigned int level)
 {
 	struct pid_namespace *ns;
 	int i;
-
+	//首先创建pid命名空间的数据结构.
 	ns = kmem_cache_zalloc(pid_ns_cachep, GFP_KERNEL);
 	if (ns == NULL)
 		goto out;
-
+	//分配一个bitmap作为分配页标记.
 	ns->pidmap[0].page = kzalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!ns->pidmap[0].page)
 		goto out_free;
-
+	//分配一个cache(slab)用来分配pid数据结构.
 	ns->pid_cachep = create_pid_cachep(level + 1);
 	if (ns->pid_cachep == NULL)
 		goto out_free_map;
 
 	kref_init(&ns->kref);
 	ns->level = level;
-
+	//清零page,并且设置free为一页的大小.
 	set_bit(0, ns->pidmap[0].page);
 	atomic_set(&ns->pidmap[0].nr_free, BITS_PER_PAGE - 1);
 
@@ -124,7 +131,7 @@ struct pid_namespace *copy_pid_ns(unsigned long flags, struct pid_namespace *old
 	new_ns = ERR_PTR(-EINVAL);
 	if (flags & CLONE_THREAD)
 		goto out_put;
-
+	//创建一个新的pid命名空间,它的level就是当前进程所属的pid空间在递增1....
 	new_ns = create_pid_namespace(old_ns->level + 1);
 	if (!IS_ERR(new_ns))
 		new_ns->parent = get_pid_ns(old_ns);

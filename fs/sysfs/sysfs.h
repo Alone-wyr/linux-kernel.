@@ -45,14 +45,14 @@ struct sysfs_dirent {
 	struct sysfs_dirent	*s_parent;
 	struct sysfs_dirent	*s_sibling;
 	const char		*s_name;
-
+	//有4中类型的dirent...
 	union {
 		struct sysfs_elem_dir		s_dir;
 		struct sysfs_elem_symlink	s_symlink;
 		struct sysfs_elem_attr		s_attr;
 		struct sysfs_elem_bin_attr	s_bin_attr;
 	};
-
+	//保存着这个dirent是哪种类型的...
 	unsigned int		s_flags;
 	ino_t			s_ino;
 	umode_t			s_mode;

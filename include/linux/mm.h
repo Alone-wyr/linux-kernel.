@@ -184,6 +184,8 @@ struct vm_fault {
 struct vm_operations_struct {
 	void (*open)(struct vm_area_struct * area);
 	void (*close)(struct vm_area_struct * area);
+//如果地址空间中的某个虚拟内存页不在物理内存中，自动触发的缺页异常处理程序会调用
+//该函数，将对应的数据读取到一个映射在用户地址空间的物理内存中。
 	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
 
 	/* notification that a previously read-only page is about to become
@@ -304,7 +306,7 @@ static inline void get_page(struct page *page)
 	VM_BUG_ON(atomic_read(&page->_count) == 0);
 	atomic_inc(&page->_count);
 }
-
+//x的为内核虚拟地址.
 static inline struct page *virt_to_head_page(const void *x)
 {
 	struct page *page = virt_to_page(x);
@@ -676,14 +678,21 @@ static inline void reset_page_mapcount(struct page *page)
 {
 	atomic_set(&(page)->_mapcount, -1);
 }
-
+//该函数返回值
+//0:没有人使用... > 1: 就是被共享... = 1: 只有一个进程引用.
 static inline int page_mapcount(struct page *page)
-{
+{	
+	//_mapcount字段代表多少页表项指向该页，当为-1为没有，
+	//0为1个, >=1 代表该页共享..
 	return atomic_read(&(page)->_mapcount) + 1;
 }
 
 /*
  * Return true if this page is mapped into pagetables.
+ */
+ /*
+ 用来检测该页是不是被映射到了页表上
+ _mapcount>=0则代表有被映射到页表咯。
  */
 static inline int page_mapped(struct page *page)
 {
@@ -1147,6 +1156,11 @@ extern unsigned long mmap_region(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long flags,
 	unsigned int vm_flags, unsigned long pgoff);
 
+//如果映射文件,那么file为文件指针，offset就是文件的偏移...
+//addr,指定要创建的映射区从哪个地址开始查找空闲。
+//len，创建的线性区的长度
+//prot，访问该线性区内的页的属性。
+//flag，指定其他的一些标记。
 static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset)
@@ -1154,6 +1168,7 @@ static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long ret = -EINVAL;
 	if ((offset + PAGE_ALIGN(len)) < offset)
 		goto out;
+	//offset要是PAGE对齐的...
 	if (!(offset & ~PAGE_MASK))
 		ret = do_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
 out:
@@ -1219,7 +1234,9 @@ extern struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned lon
 static inline struct vm_area_struct * find_vma_intersection(struct mm_struct * mm, unsigned long start_addr, unsigned long end_addr)
 {
 	struct vm_area_struct * vma = find_vma(mm,start_addr);
-
+	//已经知道了find_vma返回的值第一个vma->vm_end大于start_addr的vma数据结构了。。。
+	//但是要查看是不是有覆盖，当然还需要在检测vma->vm_start是不是大于了end_addr了。
+	//如果大于，那么就是说明start_addr - end_addr这个区间，当前的线性地址区间不会覆盖。
 	if (vma && end_addr <= vma->vm_start)
 		vma = NULL;
 	return vma;

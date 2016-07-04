@@ -8,7 +8,7 @@
 #include <linux/kref.h>
 
 struct pidmap {
-       atomic_t nr_free;
+       atomic_t nr_free;	//值的是当前的page是否有空闲的bit
        void *page;
 };
 
@@ -23,6 +23,7 @@ struct pid_namespace {
 	struct task_struct *child_reaper;
 	struct kmem_cache *pid_cachep;
 	unsigned int level;
+	//指向上一级的命名空间。 
 	struct pid_namespace *parent;
 #ifdef CONFIG_PROC_FS
 	struct vfsmount *proc_mnt;

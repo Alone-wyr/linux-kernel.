@@ -146,7 +146,7 @@ static int sysfs_count_nlink(struct sysfs_dirent *sd)
 static void sysfs_init_inode(struct sysfs_dirent *sd, struct inode *inode)
 {
 	struct bin_attribute *bin_attr;
-
+	//指向sysfs_dirent...
 	inode->i_private = sysfs_get(sd);
 	inode->i_mapping->a_ops = &sysfs_aops;
 	inode->i_mapping->backing_dev_info = &sysfs_backing_dev_info;
@@ -207,7 +207,18 @@ static void sysfs_init_inode(struct sysfs_dirent *sd, struct inode *inode)
 struct inode * sysfs_get_inode(struct sysfs_dirent *sd)
 {
 	struct inode *inode;
-
+	/*
+	对于一个目录文件，有两个数据结构 dentry 和inode咯.
+	sysfs_dirent->s_ino指向了这个目录文件的inode号。
+	对于一个文件系统来说，超级块+inode号可以找到inode数据结构.
+	根据sb + ino计算hash值.
+	*/
+	/*
+	如果没有存在于当前的hash表中，那么就需要分配一个新的inode数据结构咯。
+	同时设置i_state为I_NEW标记.还有I_LOCK标记，代表还不可用..因为它还没初始化完成.
+	避免说，有另外的地方也去查找了hash表，得到后直接使用。因此，需要在初始化完成后，
+	需要对I_NEW和I_LOCK进行clear掉.
+	*/
 	inode = iget_locked(sysfs_sb, sd->s_ino);
 	if (inode && (inode->i_state & I_NEW))
 		sysfs_init_inode(sd, inode);

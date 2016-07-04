@@ -263,7 +263,7 @@ int ipc_addid(struct ipc_ids* ids, struct kern_ipc_perm* new, int size)
 	new->deleted = 0;
 	rcu_read_lock();
 	spin_lock(&new->lock);
-
+	//这个id就是idr中得到对应的指针的值..
 	err = idr_get_new(&ids->ipcs_idr, new, &id);
 	if (err) {
 		spin_unlock(&new->lock);
@@ -276,11 +276,11 @@ int ipc_addid(struct ipc_ids* ids, struct kern_ipc_perm* new, int size)
 	current_euid_egid(&euid, &egid);
 	new->cuid = new->uid = euid;
 	new->gid = new->cgid = egid;
-
+	//每次分配一个新的队列都会对seq递增...超出范围后就需要翻转咯..
 	new->seq = ids->seq++;
 	if(ids->seq > ids->seq_max)
 		ids->seq = 0;
-
+	//把idr对应的值还需要进行一次计算得到的值才是返回到用户态的标识符.
 	new->id = ipc_buildid(id, new->seq);
 	return id;
 }
@@ -333,11 +333,12 @@ static int ipc_check_perms(struct kern_ipc_perm *ipcp, struct ipc_ops *ops,
 			struct ipc_params *params)
 {
 	int err;
-
+	//权限的检查.
 	if (ipcperms(ipcp, params->flg))
 		err = -EACCES;
 	else {
 		err = ops->associate(ipcp, params->flg);
+		//没有出错的情况下...返回id值给用户层.
 		if (!err)
 			err = ipcp->id;
 	}
@@ -358,6 +359,7 @@ static int ipc_check_perms(struct kern_ipc_perm *ipcp, struct ipc_ops *ops,
  *      / security checkings if the key is found.
  *
  *	On success, the ipc id is returned.
+ 	成功之后，会返回ipc的id，也就是用户态使用的标识符...
  */
 static int ipcget_public(struct ipc_namespace *ns, struct ipc_ids *ids,
 		struct ipc_ops *ops, struct ipc_params *params)
@@ -377,14 +379,17 @@ retry:
 	if (ipcp == NULL) {
 		/* key not used */
 		if (!(flg & IPC_CREAT))
-			err = -ENOENT;
+			//no entry..没有这个项.
+			err = -ENOENT;	
 		else if (!err)
+			//前面有idr_pre_get由于可能需要分配内存的..如果返回值为0，就是内存不足..
 			err = -ENOMEM;
 		else
 			err = ops->getnew(ns, params);
 	} else {
 		/* ipc object has been locked by ipc_findkey() */
-
+		//这里的分支代表参数key有对应的队列存在了..
+		//如果是要创建且IPC_EXCL存在，那就返回错误..
 		if (flg & IPC_CREAT && flg & IPC_EXCL)
 			err = -EEXIST;
 		else {
@@ -519,7 +524,14 @@ static inline int rcu_use_vmalloc(int size)
  *	Returns the pointer to the object.
  *	NULL is returned if the allocation fails. 
  */
- 
+ /*
+ 这个函数其实是分配了2个数据结构的.一个数参数传递过来的size,其实是struct msg_queue
+ 同时也分配了struct ipc_rcu_hdr数据结构..
+ 在分配的内存中，前面是放ipc_rcu_hdr后面放msg_queue..
+ 分配后out += HDRLEN_VMALLOC或HDRLEN_KMALLOC，都是让out指向msg_queue...
+ 尤其也要注意ipc_rcu_hdr有成员*data[0]，其实它不占空间，只是这样可以使用container_of的宏，知道
+ msg_queue的地址得到对应的ipc_rcu_hdr的地址.
+ */
 void* ipc_rcu_alloc(int size)
 {
 	void* out;
@@ -692,9 +704,11 @@ void ipc64_perm_to_ipc_perm (struct ipc64_perm *in, struct ipc_perm *out)
 struct kern_ipc_perm *ipc_lock(struct ipc_ids *ids, int id)
 {
 	struct kern_ipc_perm *out;
+	//通过id标识符的值,,,计算出idr的值..通过该值就可以找到要查找的数据结构地址...IDR{idx->pointer}
 	int lid = ipcid_to_idx(id);
 
 	rcu_read_lock();
+	//下面就是上面得到的lid然后再idr中查找。
 	out = idr_find(&ids->ipcs_idr, lid);
 	if (out == NULL) {
 		rcu_read_unlock();
@@ -718,11 +732,11 @@ struct kern_ipc_perm *ipc_lock(struct ipc_ids *ids, int id)
 struct kern_ipc_perm *ipc_lock_check(struct ipc_ids *ids, int id)
 {
 	struct kern_ipc_perm *out;
-
+	//查找idr找到kern_ipc_perm数据结构.
 	out = ipc_lock(ids, id);
 	if (IS_ERR(out))
 		return out;
-
+	//其次还需要进行ID校验，看是否是对的...
 	if (ipc_checkid(out, id)) {
 		ipc_unlock(out);
 		return ERR_PTR(-EIDRM);

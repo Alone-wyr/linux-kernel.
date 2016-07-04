@@ -304,15 +304,20 @@ int
 copy_thread(unsigned long clone_flags, unsigned long stack_start,
 	    unsigned long stk_sz, struct task_struct *p, struct pt_regs *regs)
 {
+	//得到thread_info和堆栈地址..
 	struct thread_info *thread = task_thread_info(p);
 	struct pt_regs *childregs = task_pt_regs(p);
-
+	//存放在堆栈里面的寄存器的值(当时候fork完成之后，从内核态返回用户态，需要出栈这些寄存器值)
 	*childregs = *regs;
+	//返回值为0
 	childregs->ARM_r0 = 0;
+	//用户空间下的堆栈.
 	childregs->ARM_sp = stack_start;
 
 	memset(&thread->cpu_context, 0, sizeof(struct cpu_context_save));
+	//内核态堆栈的起始地址.
 	thread->cpu_context.sp = (unsigned long)childregs;
+	//fork的返回地址.
 	thread->cpu_context.pc = (unsigned long)ret_from_fork;
 
 	if (clone_flags & CLONE_SETTLS)

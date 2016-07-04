@@ -17,8 +17,12 @@
  * core should ever touch these fields.
  */
 struct bus_type_private {
+	//作为这个总线的内核对象..
 	struct kset subsys;
+	//加入到该总线的驱动...
 	struct kset *drivers_kset;
+	//加入到该总线的的设备，会在该总线下面有devices目录下链接到设备..
+	//这个集合对象就是这个"devices"目录.
 	struct kset *devices_kset;
 	struct klist klist_devices;
 	struct klist klist_drivers;

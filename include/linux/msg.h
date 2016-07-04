@@ -76,9 +76,14 @@ struct msginfo {
 
 /* one msg_msg structure for each message */
 struct msg_msg {
+	//这个作为一个队列的节点存放到消息队列中去..需要注意这个字段和next的区别.
 	struct list_head m_list; 
-	long  m_type;          
+	long  m_type;  
+	//存放消息text的大小.
 	int m_ts;           /* message text size */
+	//如果一个msg的text的长度超过了DATALEN_MSG，那么就需要分成多个页来存放..
+	//但是申请连续的页来存放可能比较困难，它会每次分配一个页..next字段就是用来连接
+	//到下一个页的.
 	struct msg_msgseg* next;
 	void *security;
 	/* the actual message follows immediately */
@@ -95,8 +100,10 @@ struct msg_queue {
 	unsigned long q_qbytes;		/* max number of bytes on queue */
 	pid_t q_lspid;			/* pid of last msgsnd */
 	pid_t q_lrpid;			/* last receive pid */
-
+	
+	//存放消息的队列...
 	struct list_head q_messages;
+	//等待写入或读取的进程.
 	struct list_head q_receivers;
 	struct list_head q_senders;
 };

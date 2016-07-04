@@ -209,7 +209,7 @@ int __attribute__((weak)) arch_dup_task_struct(struct task_struct *dst,
 	*dst = *src;
 	return 0;
 }
-
+//orig, original原始的...要复制task_struct。
 static struct task_struct *dup_task_struct(struct task_struct *orig)
 {
 	struct task_struct *tsk;
@@ -219,29 +219,31 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	int err;
 
 	prepare_to_copy(orig);
-
+	//分配task_struct数据结构.
 	tsk = alloc_task_struct();
 	if (!tsk)
 		return NULL;
-
+	//分配thread_info的联合体.大小为:THREAD_SIZE_ORDER
 	ti = alloc_thread_info(tsk);
 	if (!ti) {
 		free_task_struct(tsk);
 		return NULL;
 	}
-
+	//这里面复制了task_struct结构体.
  	err = arch_dup_task_struct(tsk, orig);
 	if (err)
 		goto out;
-
+	//task_struct确定了堆栈的地址.
 	tsk->stack = ti;
 
 	err = prop_local_init_single(&tsk->dirties);
 	if (err)
 		goto out;
-
+	//这里面复制了thread_info结构体.
+	//修改了新的thread_info的task指向自己的task_struct
 	setup_thread_stack(tsk, orig);
 	stackend = end_of_stack(tsk);
+	//对stack的末端设置一个幻数,,防止堆栈溢出破坏到了thread_info
 	*stackend = STACK_END_MAGIC;	/* for overflow detection */
 
 #ifdef CONFIG_CC_STACKPROTECTOR
@@ -249,6 +251,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 #endif
 
 	/* One for us, one for whoever does the "release_task()" (usually parent) */
+	//一个给自己，一个用来被调用release_task，通常是父进程.
 	atomic_set(&tsk->usage,2);
 	atomic_set(&tsk->fs_excl, 0);
 #ifdef CONFIG_BLK_DEV_IO_TRACE
@@ -293,7 +296,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
 		struct file *file;
-
+		//标记在fork时候不要复制的vm_area_struct..
+		//因此需要减掉此区域占用的pages.
 		if (mpnt->vm_flags & VM_DONTCOPY) {
 			long pages = vma_pages(mpnt);
 			mm->total_vm -= pages;
@@ -308,9 +312,11 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 				goto fail_nomem;
 			charge = len;
 		}
+		//分配一个vm_area_struct数据结构.
 		tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 		if (!tmp)
 			goto fail_nomem;
+		//复制.
 		*tmp = *mpnt;
 		pol = mpol_dup(vma_policy(mpnt));
 		retval = PTR_ERR(pol);
@@ -318,8 +324,10 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 			goto fail_nomem_policy;
 		vma_set_policy(tmp, pol);
 		tmp->vm_flags &= ~VM_LOCKED;
+		//指向自己的mm_struct
 		tmp->vm_mm = mm;
 		tmp->vm_next = NULL;
+		//看是不是匿名的区域..如果是进行链接...匿名的东西还需要了解.....
 		anon_vma_link(tmp);
 		file = tmp->vm_file;
 		if (file) {
@@ -351,13 +359,14 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		/*
 		 * Link in the new vma and copy the page table entries.
 		 */
+		 //进行链接和复制页表项..
 		*pprev = tmp;
 		pprev = &tmp->vm_next;
 
 		__vma_link_rb(mm, tmp, rb_link, rb_parent);
 		rb_link = &tmp->vm_rb.rb_right;
 		rb_parent = &tmp->vm_rb;
-
+		//记录vm_area_struct的数目...
 		mm->map_count++;
 		retval = copy_page_range(mm, oldmm, mpnt);
 
@@ -662,6 +671,8 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 		return 0;
 
 	if (clone_flags & CLONE_VM) {
+		//创建线程的时候，会共享mm_struct
+		//mm_users记录共享该数据结构的线程的个数。
 		atomic_inc(&oldmm->mm_users);
 		mm = oldmm;
 		goto good_mm;
@@ -978,6 +989,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
+	//创建thread_info和task_struct，并且复制父进程的信息到这2个数据结构.
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
@@ -995,7 +1007,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		    p->real_cred->user != INIT_USER)
 			goto bad_fork_free;
 	}
-
+	//还不明确是什么作用..
 	retval = copy_creds(p, clone_flags);
 	if (retval < 0)
 		goto bad_fork_free;
@@ -1018,6 +1030,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->did_exec = 0;
 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
 	copy_flags(clone_flags, p);
+	//前面执行了一些复制父进程数据结构，这里需要设置自己的一些特定信息.
+	//1.初始化children/sibling链表咯。
 	INIT_LIST_HEAD(&p->children);
 	INIT_LIST_HEAD(&p->sibling);
 #ifdef CONFIG_PREEMPT_RCU
@@ -1108,23 +1122,27 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto bad_fork_cleanup_fs;
 	if ((retval = copy_signal(clone_flags, p)))
 		goto bad_fork_cleanup_sighand;
+	//拷贝父进程的地址空间.分配mm_struct/拷贝vma/复制vma对应的页表项.
 	if ((retval = copy_mm(clone_flags, p)))
 		goto bad_fork_cleanup_signal;
+	//确定是否需要设置新的命名空间...查看标记CLONE_NEWPID/CLONE_NEWNS等..
 	if ((retval = copy_namespaces(clone_flags, p)))
 		goto bad_fork_cleanup_mm;
 	if ((retval = copy_io(clone_flags, p)))
 		goto bad_fork_cleanup_namespaces;
+	//设置CPU上下文内核态堆栈/用户态堆栈/返回地址.等.
 	retval = copy_thread(clone_flags, stack_start, stack_size, p, regs);
 	if (retval)
 		goto bad_fork_cleanup_io;
-
+	//全局pid结构.
 	if (pid != &init_struct_pid) {
 		retval = -ENOMEM;
 		pid = alloc_pid(p->nsproxy->pid_ns);
 		if (!pid)
 			goto bad_fork_cleanup_io;
 
-		if (clone_flags & CLONE_NEWPID) {
+		if (clone_flags & CLONE_NEWPID) {	
+			//好像是又挂载了次proc文件系统?先略过，之后有阅读文件系统的时候在查看.
 			retval = pid_ns_prepare_proc(p->nsproxy->pid_ns);
 			if (retval < 0)
 				goto bad_fork_free_pid;
@@ -1132,12 +1150,15 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	}
 
 	ftrace_graph_init_task(p);
-
+	//返回的是level=0的pid号，最顶层的pid号赋值给task_struct的字段pid.
 	p->pid = pid_nr(pid);
 	p->tgid = p->pid;
+	//如果是创建线程，那么线程的tgid就是主线程的tgid(主线程的pid,因为tgid会赋值为pid.)
+	//tgid，为线程组ID. thread group id.
 	if (clone_flags & CLONE_THREAD)
+	//可以看到主线程的tgid等于pid,而线程的线程组id等于主线程的线程组id(实际上是主线程的pid)
 		p->tgid = current->tgid;
-
+	//判断是不是有创建了自己的命名空间.
 	if (current->nsproxy != p->nsproxy) {
 		retval = ns_cgroup_clone(p, pid);
 		if (retval)
@@ -1174,6 +1195,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	clear_all_latency_tracing(p);
 
 	/* ok, now we should be set up.. */
+	//最低字节指定当子进程退出的时候，发送给父进程的信号,CSIGNAL = 0xff
 	p->exit_signal = (clone_flags & CLONE_THREAD) ? -1 : (clone_flags & CSIGNAL);
 	p->pdeath_signal = 0;
 	p->exit_state = 0;
@@ -1182,7 +1204,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	 * Ok, make it visible to the rest of the system.
 	 * We dont wake it up yet.
 	 */
-	p->group_leader = p;
+	 //指向自身，但是对于线程来说，应该是主线程.
+	p->group_leader = p;	
 	INIT_LIST_HEAD(&p->thread_group);
 
 	/* Now that the task is set up, run cgroup callbacks if
@@ -1210,10 +1233,13 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		set_task_cpu(p, smp_processor_id());
 
 	/* CLONE_PARENT re-uses the old parent */
+	//如果是线程(轻量进程)，那它的父进程也就是创建该线程的进程的父进程
+	//相当于同创建它的进程同等等级，是兄弟.
 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {
 		p->real_parent = current->real_parent;
 		p->parent_exec_id = current->parent_exec_id;
 	} else {
+		//这里创建进程，所以它的父进程就是创建它的进程咯.
 		p->real_parent = current;
 		p->parent_exec_id = current->self_exec_id;
 	}
@@ -1237,26 +1263,39 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	}
 
 	if (clone_flags & CLONE_THREAD) {
+		//对于线程来说，它的group_leader就是主线程.
 		p->group_leader = current->group_leader;
+		//子线程的thread_group作为结点添加到主线程的的thread_group。
 		list_add_tail_rcu(&p->thread_group, &p->group_leader->thread_group);
 	}
 
 	if (likely(p->pid)) {
+		//前面设置过了real_parent.
+		//现在把进程数据结构的sibling作为结点添加到父进程的children的链表中.
 		list_add_tail(&p->sibling, &p->real_parent->children);
 		tracehook_finish_clone(p, clone_flags, trace);
-
+		//判断是创建进程/还是线程..线程的group_leader不等于自身的task_struct....
+		//标记CLONE_THREAD的设置会修改.group_leader
 		if (thread_group_leader(p)) {
+			//如果创建进程.
 			if (clone_flags & CLONE_NEWPID)
 				p->nsproxy->pid_ns->child_reaper = p;
-
-			p->signal->leader_pid = pid;
+			//do_fork函数pid参数为NULL，但是fork_idle就是init(init_struct_pid)
+			//为NULL，是正常情况，然后会在该函数里面进行分配出pid.
+			p->signal->leader_pid = pid;	//设置信号发送给的进程???字面意思.
 			tty_kref_put(p->signal->tty);
 			p->signal->tty = tty_kref_get(current->signal->tty);
+			//pgid，进程组
+			//sid，线程组
+			//新进程需要添加到当前的进程组合和会话.
 			attach_pid(p, PIDTYPE_PGID, task_pgrp(current));
 			attach_pid(p, PIDTYPE_SID, task_session(current));
 			list_add_tail_rcu(&p->tasks, &init_task.tasks);
 			__get_cpu_var(process_counts)++;
 		}
+		//可能同时多个进程使用相同的pid号，因此添加到pid数据结构的tasks链表.
+		//***另外需要注意的是，通过下面的函数调用让task_struct和pid数据结构有了联系..
+		//
 		attach_pid(p, PIDTYPE_PID, pid);
 		nr_threads++;
 	}

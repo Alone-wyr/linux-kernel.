@@ -354,7 +354,7 @@ void __init bootmem_init(void)
 		/*
 		 * Reserve any special node zero regions.
 		 */
-		if (node == 0)
+		if (node == 0)//保留内核镜像使用的内存和页表,这些只能在node:0内使用.
 			reserve_node_zero(NODE_DATA(node));
 
 		/*
@@ -429,9 +429,9 @@ free_memmap(int node, unsigned long start_pfn, unsigned long end_pfn)
 	/*
 	 * Convert to physical addresses, and
 	 * round start upwards and end downwards.
-	 */
-	pg = PAGE_ALIGN(__pa(start_pg));
-	pgend = __pa(end_pg) & PAGE_MASK;
+	 */									//计算物理地址
+	pg = PAGE_ALIGN(__pa(start_pg));			//向上页对齐.
+	pgend = __pa(end_pg) & PAGE_MASK;			//向下页对齐.
 
 	/*
 	 * If there are free pages between these,
@@ -467,7 +467,8 @@ static void __init free_unused_memmap_node(int node, struct meminfo *mi)
 		/*
 		 * If we had a previous bank, and there is a space
 		 * between the current bank and the previous, free it.
-		 */
+		 */	
+		//两个bank之间有空间..hole
 		if (prev_bank_end && prev_bank_end != bank_start)
 			free_memmap(node, prev_bank_end, bank_start);
 
@@ -485,7 +486,7 @@ void __init mem_init(void)
 	unsigned int codesize, datasize, initsize;
 	int i, node;
 
-#ifndef CONFIG_DISCONTIGMEM
+#ifndef CONFIG_DISCONTIGMEM	//max_pfn为页的数目, 这里计算mem_map中page的个数.
 	max_mapnr   = pfn_to_page(max_pfn + PHYS_PFN_OFFSET) - mem_map;
 #endif
 

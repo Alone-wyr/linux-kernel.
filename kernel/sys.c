@@ -969,11 +969,14 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
 	write_lock_irq(&tasklist_lock);
 
 	err = -ESRCH;
+	//根据pid号找到task_struct...
 	p = find_task_by_vpid(pid);
 	if (!p)
 		goto out;
 
 	err = -EINVAL;
+	//thread_group_leader返回1，确定该task_struct为进程或是线程组组长，(主线程)
+	//如果返回0，就是为线程.作为线程是不可以修改自身的进程组的.应该由线程组组长来修改.
 	if (!thread_group_leader(p))
 		goto out;
 
@@ -993,12 +996,14 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
 	err = -EPERM;
 	if (p->signal->leader)
 		goto out;
-
+	//现在要找到修改进程组组长的pid数据结构.
+	//修改进程组组长为pgid..
 	pgrp = task_pid(p);
 	if (pgid != pid) {
 		struct task_struct *g;
-
+		//根据pgid找到pid数据结构.
 		pgrp = find_vpid(pgid);
+		//根据struct pid数据结构的的类型PIDTYPE_PGID来得到进程组长的task_struct...
 		g = pid_task(pgrp, PIDTYPE_PGID);
 		if (!g || task_session(g) != task_session(group_leader))
 			goto out;
@@ -1007,7 +1012,7 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
 	err = security_task_setpgid(p, pgid);
 	if (err)
 		goto out;
-
+	//修改task_struct的pids字段的PIDTYPE_PGID类型指向的pid数据结构.
 	if (task_pgrp(p) != pgrp)
 		change_pid(p, PIDTYPE_PGID, pgrp);
 

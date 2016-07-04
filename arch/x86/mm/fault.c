@@ -401,11 +401,15 @@ static noinline int vmalloc_fault(unsigned long address)
 	 * happen within a race in page table update. In the later
 	 * case just flush:
 	 */
+	//pgd获取pgd entry的地址对应于address线性地址..
 	pgd = pgd_offset(current->active_mm, address);
+	//pgd_ref(内核pgd, init进程)获取pgd entry得地址对应于address线性地址..
 	pgd_ref = pgd_offset_k(address);
+	//判断pgd_ref是不是为空，如果为空直接返回...
+	//对该线性地址的访问就是出错的.
 	if (pgd_none(*pgd_ref))
 		return -1;
-
+	//前面判断了kernel pgd entry不是为空，那就拷贝过来到当前进程的pgd enrey上。
 	if (pgd_none(*pgd))
 		set_pgd(pgd, *pgd_ref);
 	else
@@ -415,15 +419,19 @@ static noinline int vmalloc_fault(unsigned long address)
 	 * Below here mismatches are bugs because these lower tables
 	 * are shared:
 	 */
-
+	//下面如果不匹配的话就是bug了，因为子页目录是共享的(内核空间).
+	//也可以看到，后面并没有设置当前进程页表目录的操作了。除了前面的pgd directory.
+	//在上面有判断说pgd entry是不是为none，如果为none就是访问错误，代表在非线性映射区并没有该
+	//线性地址的映射.不仅仅pgd entry要判断，对于每个目录的entry都要判断，
+	//在正常情况下是都不为none，然后最后一个目录的pte映射的page是present的。
 	pud = pud_offset(pgd, address);
 	pud_ref = pud_offset(pgd_ref, address);
-	if (pud_none(*pud_ref))
+	if (pud_none(*pud_ref))	//判断是不是访问错误的(不存在映射)
 		return -1;
-
+	//如果不相等就是bug，共用这些目录的....
 	if (pud_none(*pud) || pud_page_vaddr(*pud) != pud_page_vaddr(*pud_ref))
 		BUG();
-
+	//PMD 同理上面..
 	pmd = pmd_offset(pud, address);
 	pmd_ref = pmd_offset(pud_ref, address);
 	if (pmd_none(*pmd_ref))
@@ -431,11 +439,11 @@ static noinline int vmalloc_fault(unsigned long address)
 
 	if (pmd_none(*pmd) || pmd_page(*pmd) != pmd_page(*pmd_ref))
 		BUG();
-
+	//PTE也同理上面，但是判断不是为none，而是present了。
 	pte_ref = pte_offset_kernel(pmd_ref, address);
 	if (!pte_present(*pte_ref))
 		return -1;
-
+	//同样是获取pte，理论上还是同pte_ref的。
 	pte = pte_offset_kernel(pmd, address);
 
 	/*
@@ -443,6 +451,7 @@ static noinline int vmalloc_fault(unsigned long address)
 	 * outside mem_map, and the NUMA hash lookup cannot handle
 	 * that:
 	 */
+	 //下面也是验证是不是有bug...
 	if (!pte_present(*pte) || pte_pfn(*pte) != pte_pfn(*pte_ref))
 		BUG();
 
@@ -948,10 +957,15 @@ access_error(unsigned long error_code, int write, struct vm_area_struct *vma)
 	}
 
 	/* read, present: */
+	/*读操作，而且页面存在...那么也是个错误.ULK3,378的方框图的page is present.*/
 	if (unlikely(error_code & PF_PROT))
 		return 1;
 
 	/* read, not present: */
+	/*
+	读，不存在页。可能按需分页吧。检测该线性区是不是可读的，或是可执行的。
+	当然，可写的，同时也表示可读写执行。
+	*/
 	if (unlikely(!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE))))
 		return 1;
 
@@ -1003,6 +1017,9 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 * protection error (error_code & 9) == 0.
 	 */
 	if (unlikely(fault_in_kernel_space(address))) {
+		//不是因为非法的访问
+		//不是在用户态.
+		//vmalloc_fault返回0，代表处理非线性映射线性地址引起的缺页异常处理完成了。
 		if (!(error_code & (PF_RSVD|PF_USER|PF_PROT)) &&
 		    vmalloc_fault(address) >= 0)
 			return;

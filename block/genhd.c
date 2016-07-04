@@ -1103,7 +1103,7 @@ dev_t blk_lookup_devt(const char *name, int partno)
 	while ((dev = class_dev_iter_next(&iter))) {
 		struct gendisk *disk = dev_to_disk(dev);
 		struct hd_struct *part;
-
+		//比较当前系统的gendisk的名字。如果相等找到后，就可以确定了设备号...
 		if (strcmp(dev_name(dev), name))
 			continue;
 

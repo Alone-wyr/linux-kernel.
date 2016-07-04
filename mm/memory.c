@@ -436,14 +436,19 @@ static void print_bad_pte(struct vm_area_struct *vma, unsigned long addr,
 	add_taint(TAINT_BAD_PAGE);
 }
 
+/*从字面上来看，就是不可以共享，并且可以写*/
+/*引起COW的，是因为硬件上pte显示了为read-only，但是线性上的flag为VM_MAYWRITE。
+而且显然是不能VM_SHARED，不然都直接共享了，不必要在引起异常在分配页框给写入者了。
+*/
 static inline int is_cow_mapping(unsigned int flags)
 {
 	return (flags & (VM_SHARED | VM_MAYWRITE)) == VM_MAYWRITE;
 }
 
-/*
+/* 该函数根据pte来获取struct page数据结构..
  * vm_normal_page -- This function gets the "struct page" associated with a pte.
- *
+ * "Special"的映射不需要同struct page数据结构相关联(要么是不存在struct page，要么是不想被访问).
+    在这样的情况下，直接返回NULL.."Normal"的映射是有struct page数据结构相关联的。
  * "Special" mappings do not wish to be associated with a "struct page" (either
  * it doesn't exist, or it exists but they don't want to touch it). In this
  * case, NULL is returned here. "Normal" mappings do have a struct page.
@@ -491,6 +496,7 @@ static inline int is_cow_mapping(unsigned int flags)
 struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 				pte_t pte)
 {
+	//pte为页表项的值，可以通过pte_val得到物理地址...然后在左移12bit得到页编号...
 	unsigned long pfn = pte_pfn(pte);
 
 	if (HAVE_PTE_SPECIAL) {
@@ -529,6 +535,7 @@ check_pfn:
 	 * eg. VDSO mappings can cause them to exist.
 	 */
 out:
+	//根据页编号得到page数据结构.
 	return pfn_to_page(pfn);
 }
 
@@ -544,7 +551,7 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		unsigned long addr, int *rss)
 {
 	unsigned long vm_flags = vma->vm_flags;
-	pte_t pte = *src_pte;
+	pte_t pte = *src_pte;//拷贝.
 	struct page *page;
 
 	/* pte contains position in swap or file, so copy. */
@@ -579,8 +586,11 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 * If it's a COW mapping, write protect it both
 	 * in the parent and the child
 	 */
+	 //判断是不是写时复制的..如果是，需要对页表进行保护.
 	if (is_cow_mapping(vm_flags)) {
+		//设置父进程的页表项为只读.
 		ptep_set_wrprotect(src_mm, addr, src_pte);
+		//设置子进程的页表项为只读.
 		pte = pte_wrprotect(pte);
 	}
 
@@ -588,14 +598,18 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 * If it's a shared mapping, mark it clean in
 	 * the child
 	 */
+	//如果页是共享的，那么在子进程的页表项清除dirty的标记.
 	if (vm_flags & VM_SHARED)
 		pte = pte_mkclean(pte);
+	//清除页表项的访问位.
 	pte = pte_mkold(pte);
 
 	page = vm_normal_page(vma, addr, pte);
 	if (page) {
 		get_page(page);
+		//增加一个页表项映射到该页,递增page数据结构的_mapcount的值.
 		page_dup_rmap(page, vma, addr);
+		//!!的作用是让最后要么为0，要么为1..可以看到是要计数匿名页和非匿名页的数目..
 		rss[!!PageAnon(page)]++;
 	}
 
@@ -639,11 +653,15 @@ again:
 		}
 		copy_one_pte(dst_mm, src_mm, dst_pte, src_pte, vma, addr, rss);
 		progress += 8;
+		//一个pte表项可以映射PAGE_SIZE大小，addr和end都是PAGE_SIZE对齐的
+		//这里其实也就是创建addr-end地址区域的pte项。
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
 	arch_leave_lazy_mmu_mode();
 	spin_unlock(src_ptl);
 	pte_unmap_nested(src_pte - 1);
+	//rss[0]为file的vma..
+	//rss[1]为anon的vma..
 	add_mm_rss(dst_mm, rss[0], rss[1]);
 	pte_unmap_unlock(dst_pte - 1, dst_ptl);
 	cond_resched();
@@ -742,6 +760,7 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	dst_pgd = pgd_offset(dst_mm, addr);
 	src_pgd = pgd_offset(src_mm, addr);
 	do {
+		//要么返回addr + PAGE_SIZE 要么返回end (因为end 小于了addr + PAGE_SIZE)
 		next = pgd_addr_end(addr, end);
 		if (pgd_none_or_clear_bad(src_pgd))
 			continue;
@@ -825,6 +844,10 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 			page_remove_rmap(page);
 			if (unlikely(page_mapcount(page) < 0))
 				print_bad_pte(vma, addr, ptent, page);
+			/*
+			执行到这里，该页表项是有映射到物理内存的。但是do_munmap的调用会释放该线性区
+			那么也需要递减usag counter的计数器.
+			*/
 			tlb_remove_page(tlb, page);
 			continue;
 		}
@@ -967,7 +990,7 @@ unsigned long unmap_vmas(struct mmu_gather **tlbp,
 	spinlock_t *i_mmap_lock = details? details->i_mmap_lock: NULL;
 	int fullmm = (*tlbp)->fullmm;
 	struct mm_struct *mm = vma->vm_mm;
-
+	//遍历vma链表，释放掉start ~ end区间所占据的页表项...
 	mmu_notifier_invalidate_range_start(mm, start_addr, end_addr);
 	for ( ; vma && vma->vm_start < end_addr; vma = vma->vm_next) {
 		unsigned long end;
@@ -1090,6 +1113,7 @@ EXPORT_SYMBOL_GPL(zap_vma_ptes);
 /*
  * Do a quick page-table lookup for a single page.
  */
+ //函数的作用是根绝虚拟地址address来得到对应的page描述符。
 struct page *follow_page(struct vm_area_struct *vma, unsigned long address,
 			unsigned int flags)
 {
@@ -1106,7 +1130,8 @@ struct page *follow_page(struct vm_area_struct *vma, unsigned long address,
 		BUG_ON(flags & FOLL_GET);
 		goto out;
 	}
-
+	//通过页表来得到page的描述符
+	//pgd -> pud -> pmd -> pte.
 	page = NULL;
 	pgd = pgd_offset(mm, address);
 	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
@@ -1141,6 +1166,8 @@ struct page *follow_page(struct vm_area_struct *vma, unsigned long address,
 		goto no_page;
 	if ((flags & FOLL_WRITE) && !pte_write(pte))
 		goto unlock;
+	//通过pte的值可以得到映射后的物理地址，通过物理地址可以获取到页编号
+	//最后通过页描述符数组可以得到了页描述符。
 	page = vm_normal_page(vma, address, pte);
 	if (unlikely(!page))
 		goto bad_page;
@@ -1283,13 +1310,15 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 						&start, &len, i, write);
 			continue;
 		}
-
+		//前面调用的find_extend_vma函数，得到了addr指定的vma的数据结构了。
 		foll_flags = FOLL_TOUCH;
 		if (pages)
-			foll_flags |= FOLL_GET;
+			foll_flags |= FOLL_GET;	//得到page数据结构。
+		//如果没有写的属性，而且没有对应页表，那映射到"零"页框上去?
 		if (!write && use_zero_page(vma))
 			foll_flags |= FOLL_ANON;
-
+		//外面的do-while是来获取VMA的。
+		//下面这个do-while，是根绝VMA的线性区，然后去获取page描述符的。
 		do {
 			struct page *page;
 
@@ -1308,8 +1337,12 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				foll_flags |= FOLL_WRITE;
 
 			cond_resched();
+			//follow_page根据start参数得到对应的page描述符，也可能当前start没有分配page。
+			//那么将会返回NULL咯。
 			while (!(page = follow_page(vma, start, foll_flags))) {
 				int ret;
+				//此时调用该函数，相当于对一个没有映射页框的虚拟地址写入，引起了缺页异常
+				//那么，内部将会分配页框给它,start虚拟地址映射。
 				ret = handle_mm_fault(mm, vma, start,
 						foll_flags & FOLL_WRITE);
 				if (ret & VM_FAULT_ERROR) {
@@ -1344,6 +1377,9 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			}
 			if (IS_ERR(page))
 				return i ? i : PTR_ERR(page);
+			//前面根据start参数，获得到对应page描述符。
+			//pages为传递进来的page类型的数组，用来存放要获取的页描述符指针...
+			//这里进行赋值...
 			if (pages) {
 				pages[i] = page;
 
@@ -1353,13 +1389,22 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			if (vmas)
 				vmas[i] = vma;
 			i++;
+			//start递增，上面的follow_page再去获取对应page描述符。
 			start += PAGE_SIZE;
 			len--;
+			//退出条件有2个，一个是要得到的len已经获取完毕
+			//另外一个是这个VMA已经得到的页框完毕了。
+			//那么需要退出该while循环。让外层的while在重新获取一个VMA。
 		} while (len && start < vma->vm_end);
 	} while (len);
+	//函数的返回值为实际上得到的页数目....
 	return i;
 }
 
+//len的参数为希望得到的page描述符的个数。。
+//返回值，确实实际上得到的page描述符的个数。。
+//当前，也可能pages参数为NULL，它只是想让start开始的虚拟地址，区间[start - (start + len * PAGE_SIZE)]
+//都映射到了物理内存。
 int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 		unsigned long start, int len, int write, int force,
 		struct page **pages, struct vm_area_struct **vmas)
@@ -1673,7 +1718,7 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 	if (addr == vma->vm_start && end == vma->vm_end) {
 		vma->vm_pgoff = pfn;
 		vma->vm_flags |= VM_PFN_AT_MMAP;
-	} else if (is_cow_mapping(vma->vm_flags))
+	} else if (is_cow_m apping(vma->vm_flags))
 		return -EINVAL;
 
 	vma->vm_flags |= VM_IO | VM_RESERVED | VM_PFNMAP;
@@ -1878,6 +1923,7 @@ static inline void cow_user_page(struct page *dst, struct page *src, unsigned lo
  * This routine handles present pages, when users try to write
  * to a shared page. It is done by copying the page to a new address
  * and decrementing the shared-page counter for the old page.
+ * 这个例程处理当前的页,当用户尝试去写一个共享的(_mapcount > 1)页.
  *
  * Note that this routine assumes that the protection checks have been
  * done by the caller (the low-level page fault routine in most cases).
@@ -1901,7 +1947,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	int reuse = 0, ret = 0;
 	int page_mkwrite = 0;
 	struct page *dirty_page = NULL;
-
+	//address参数是可以不需要的,orig_pte为pte entry的内容，可以得到映射的物理地址
+	//根据物理地址可以得到页框编号，然后根据mem_map数组得到页框描述符。
 	old_page = vm_normal_page(vma, address, orig_pte);
 	if (!old_page) {
 		/*
@@ -1922,6 +1969,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * not dirty accountable.
 	 */
 	if (PageAnon(old_page)) {
+		//如果该页是匿名页..
 		if (!trylock_page(old_page)) {
 			page_cache_get(old_page);
 			pte_unmap_unlock(page_table, ptl);
@@ -1935,10 +1983,15 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			}
 			page_cache_release(old_page);
 		}
+		//主要是对字段_mapcount的值来判断是该page是不是多个进程同时引用。
+		//reuse等于1的话(只有一个进程引用)，就是可以直接使用该页，而不用去
+		//分配新的页框了，直接修改pte的内容。
 		reuse = reuse_swap_page(old_page);
 		unlock_page(old_page);
-	} else if (unlikely((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
+	}else if (unlikely((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
 					(VM_WRITE|VM_SHARED))) {
+	//如何走到这个分支的????注释说的是get_user_pages()???
+	//
 		/*
 		 * Only catch write-faults on shared writable pages,
 		 * read-only shared pages can get COWed by
@@ -1999,10 +2052,14 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		}
 		dirty_page = old_page;
 		get_page(dirty_page);
+		//进入到这里是因为vm_flag具有SHARED的特性，对于一个可以SHARED的页来说
+		//可以同时对该页进行多个写入咯..代表该页属于大家的..
 		reuse = 1;
 	}
 
 	if (reuse) {
+		//reuse为1的时候，可以认为是不用在去分配一个页框给写入者了..
+		//而是直接修改要写入的页对应的pte的read-only修改为writable.
 reuse:
 		flush_cache_page(vma, address, pte_pfn(orig_pte));
 		entry = pte_mkyoung(orig_pte);
@@ -2023,6 +2080,7 @@ gotten:
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
 	VM_BUG_ON(old_page == ZERO_PAGE(0));
+	//分配1个页框,分配的页框可能是高端地址的咯。
 	new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, address);
 	if (!new_page)
 		goto oom;
@@ -2054,6 +2112,7 @@ gotten:
 		} else
 			inc_mm_counter(mm, anon_rss);
 		flush_cache_page(vma, address, pte_pfn(orig_pte));
+		//设置自身的pte entry指向刚才分配的页框..new_page为页框的物理地址..
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 		/*
@@ -2064,6 +2123,7 @@ gotten:
 		 */
 		ptep_clear_flush_notify(vma, address, page_table);
 		page_add_new_anon_rmap(new_page, vma, address);
+		//设置pte entry.
 		set_pte_at(mm, address, page_table, entry);
 		update_mmu_cache(vma, address, entry);
 		if (old_page) {
@@ -2457,13 +2517,17 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	if (!pte_unmap_same(mm, pmd, page_table, orig_pte))
 		goto out;
-
+	/*根据页表项，可以得到该页框被回收到交换区的位置*/
 	entry = pte_to_swp_entry(orig_pte);
 	if (is_migration_entry(entry)) {
 		migration_entry_wait(mm, pmd, address);
 		goto out;
 	}
 	delayacct_set_flag(DELAYACCT_PF_SWAPIN);
+	/*
+	查看是否在swap cache..该页可能是多个进程共享的，而其他进程已经发生了异常把页放入到了
+	swap cache中了
+	*/
 	page = lookup_swap_cache(entry);
 	if (!page) {
 		grab_swap_token(); /* Contend for token _before_ read-in */
@@ -2522,7 +2586,13 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	inc_mm_counter(mm, anon_rss);
 	pte = mk_pte(page, vma->vm_page_prot);
+	//如果只有一个进程指向该页，那么需要把该页从swap cache中移除掉.
 	if (write_access && reuse_swap_page(page)) {
+		//如果是仅仅被一个进程引用，且对该页的操作是写..
+		//那么需要对页表项设置为可写入的，避免后面引起的缺页异常...
+		//为什么要这样,,因为如果多个进程指向该页，那么可以进行对齐共享...
+		//那如果多个进程指向，且是写。。那就等缺页异常的处理了...
+		//但是对于当前的进程来说，它在下面会调用do_wp_page来处理，相当于发生了缺页异常了咯。
 		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
 		write_access = 0;
 	}
@@ -2538,6 +2608,8 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	unlock_page(page);
 
 	if (write_access) {
+		//来到这里代表该页有多个进程引用，且作为write的方式要操作该页
+		//此时直接相当于引起了缺页异常。
 		ret |= do_wp_page(mm, vma, address, page_table, pmd, ptl, pte);
 		if (ret & VM_FAULT_ERROR)
 			ret &= VM_FAULT_ERROR;
@@ -2574,25 +2646,30 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	/* Allocate our own private page. */
 	pte_unmap(page_table);
-
+	//该函数确定vma拥有一个anon_vma。
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
+	//分配一个页给它.
 	page = alloc_zeroed_user_highpage_movable(vma, address);
 	if (!page)
 		goto oom;
+	//设置标记PG_uptodate
 	__SetPageUptodate(page);
 
 	if (mem_cgroup_newpage_charge(page, mm, GFP_KERNEL))
 		goto oom_free_page;
-
+	//设置pte entry的内容
 	entry = mk_pte(page, vma->vm_page_prot);
+	//设置为dirty and writeable.
 	entry = maybe_mkwrite(pte_mkdirty(entry), vma);
-
+	//得到要设置pte entry的地址.
 	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
+	//应该是none的pte entry...
 	if (!pte_none(*page_table))
 		goto release;
 	inc_mm_counter(mm, anon_rss);
 	page_add_new_anon_rmap(page, vma, address);
+	//设置pte entry..那么下次访问的时候就不会在发生缺页异常了...
 	set_pte_at(mm, address, page_table, entry);
 
 	/* No need to invalidate - it was non-present before */
@@ -2623,6 +2700,25 @@ oom:
  * but allow concurrent faults), and pte neither mapped nor locked.
  * We return with mmap_sem still held, but pte unmapped and unlocked.
  */
+ /*进入到这个函数的有2中可能，分别是线性映射引起的缺页或是非线性引起的缺页
+ do_linear_fault
+				-> __do_fault.
+ do_nolinear_fault.
+ 都是和文件的映射相关联的.对应的vma都会定义了fault函数来从文件中获取到内容到page，并且返回struct page描述符..
+ 如果对于一个private同时可以write的memory region来说，它相当于和文件断开联系了，对这个memory region的写
+ 并不会更新file on disk的数据。那么可以认为该页框就是一个匿名页框。
+ 
+ fault函数首先是到mapping->page_tree上进行找到pgoff对应到的struct page。因此得到的page是和文件相关联的
+ 而对于变成匿名页的话，它的处理方式是就是把分配新的，然后拷贝数据过去。。
+
+ fault函数返回的struct page数据结构，该页框可能是被shared，writeable或是shared read的。
+ 因此对于private的writable的memory region那么需要重新分配一个页框给它..这样同时也避免了马上
+ 要到的cow..(假设是多个进程同时shared & read的page).
+ 对于private & write的memory region就可以认为它是一个匿名线性区了....对该线性区的数据modify不会updates file
+ on disk...
+
+ 我自己这么分析的。至于正确性还需要验证。。。
+ */
 static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		unsigned long address, pmd_t *pmd,
 		pgoff_t pgoff, unsigned int flags, pte_t orig_pte)
@@ -2642,7 +2738,8 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	vmf.pgoff = pgoff;
 	vmf.flags = flags;
 	vmf.page = NULL;
-
+	//该函数的主要作用就是获取page的描述符来给字段vmf.page。。。
+	//该page可能同时会有多个进程共享它...
 	ret = vma->vm_ops->fault(vma, &vmf);
 	if (unlikely(ret & (VM_FAULT_ERROR | VM_FAULT_NOPAGE)))
 		return ret;
@@ -2660,8 +2757,15 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * Should we do an early C-O-W break?
 	 */
 	page = vmf.page;
+	//判断是否因为"写操作"引起的缺页异常......(按需分配)
 	if (flags & FAULT_FLAG_WRITE) {
 		if (!(vma->vm_flags & VM_SHARED)) {
+			
+			//private & write 的属性....为了避免说马上会到的写入操作...就直接先重新分配一个页框给它..
+			//原来该memory region是和文件相关联的，但是由于它的属性...把它设置为匿名线性区..
+			//private 和write 的属性集合，对它的写就是会导致和文件的联系断开。
+
+			//为该线性区分配anon_vma数据结构.
 			anon = 1;
 			if (unlikely(anon_vma_prepare(vma))) {
 				ret = VM_FAULT_OOM;
@@ -2685,14 +2789,20 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 			 */
 			if (vma->vm_flags & VM_LOCKED)
 				clear_page_mlock(vmf.page);
+			//拷贝数据到new page....vmf.page是调用vma->vm_ops->fault(vma, &vmf);得到的
 			copy_user_highpage(page, vmf.page, address, vma);
 			__SetPageUptodate(page);
 		} else {
+			//这里的分支，代表该线性区的属性  shared & write...
+			//然后前面得到过struct page的数据结构了..那就只需要进行修改pte映射到该页框..
 			/*
 			 * If the page will be shareable, see if the backing
 			 * address space wants to know that the page is about
 			 * to become writable
 			 */
+			 //page_mkwrite大部分情况下都是为NULL的..
+			 //vma->vm_ops只有fault函数是有定义的...
+			 //函数集合为generic_file_vm_ops..
 			if (vma->vm_ops->page_mkwrite) {
 				int tmp;
 
@@ -2737,8 +2847,11 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		entry = mk_pte(page, vma->vm_page_prot);
 		if (flags & FAULT_FLAG_WRITE)
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
+		//上面进行设置pte entry....
+		
 		if (anon) {
 			inc_mm_counter(mm, anon_rss);
+			//page是刚刚分配的..因此会设置__mapcount..
 			page_add_new_anon_rmap(page, vma, address);
 		} else {
 			inc_mm_counter(mm, file_rss);
@@ -2748,6 +2861,7 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 				get_page(dirty_page);
 			}
 		}
+		//设置pte entry....
 		set_pte_at(mm, address, page_table, entry);
 
 		/* no need to invalidate: a not-present page won't be cached */
@@ -2765,6 +2879,7 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 
 out:
 	if (dirty_page) {
+		//write & shared 
 		struct address_space *mapping = page->mapping;
 
 		if (set_page_dirty(dirty_page))
@@ -2783,6 +2898,8 @@ out:
 		if (vma->vm_file)
 			file_update_time(vma->vm_file);
 	} else {
+	//read..
+	//write & private.
 		unlock_page(vmf.page);
 		if (anon)
 			page_cache_release(vmf.page);
@@ -2804,6 +2921,10 @@ static int do_linear_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	unsigned int flags = (write_access ? FAULT_FLAG_WRITE : 0);
 
 	pte_unmap(page_table);
+	//线性映射文件发生的缺页异常..要从文件的哪个offset读取数据到页框..
+	//这个offset的值计算为根据发生异常的address得到它所在的线性区(vma)
+	//每个vma都有一个pgoff存放映射的起始offset。
+	//那么可以根据异常的address和vma->pgoff来计算要从文件读取的偏移量了.
 	return __do_fault(mm, vma, address, pmd, pgoff, flags, orig_pte);
 }
 
@@ -2834,8 +2955,12 @@ static int do_nonlinear_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		print_bad_pte(vma, address, orig_pte, NULL);
 		return VM_FAULT_OOM;
 	}
-
+	//进行非线性文件映射的时候会对pte表项中保存pgoff..
+	//pgoff是相对文件的索引的...
+	//可以查看上面关于线性文件映射对于pgoff的描述。。
 	pgoff = pte_to_pgoff(orig_pte);
+	//下面这个函数在线性映射的缺页异常也会调用..
+	//只是因为pgoff的不同而已。。。
 	return __do_fault(mm, vma, address, pmd, pgoff, flags, orig_pte);
 }
 
@@ -2860,6 +2985,15 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 	spinlock_t *ptl;
 
 	entry = *pte;
+	//pte_present(entry)返回0的情况下:
+	//demand paging..按需分页，没有映射到物理内存页
+	//case 1: 从没访问过,根据pte_none来判断是不是之前分配过页框(之前映射过页框)
+	//		   对于case 1来区别，映射的是文件，或者是匿名映射区。根据vma->vm_ops是否为NULL来判断
+	//		   1.1 如果非NULL，就是映射到文件调用do_linear_fault。1.2 如果为NULL调用do_anonymous_page。
+	//case 2: 该页非线性文件映射..
+	//case 3: 最后一个就是页框的数据被保存到了交换区了
+	//对于case 2, case 3都是之前就已经分配过页框映射过，但是它们后来被回收了...
+	//case 2:也是从文件中读取数据。
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
 			if (vma->vm_ops) {
@@ -2877,11 +3011,16 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 					pte, pmd, write_access, entry);
 	}
 
+	//来到了这里代表present为1，也就是该pte entry实际上是有映射到物理页的..
+	//但是因为pte entry指示的页框为readonly，但是要执行write的操作，因此引起的缺页异常。
 	ptl = pte_lockptr(mm, pmd);
 	spin_lock(ptl);
 	if (unlikely(!pte_same(*pte, entry)))
 		goto unlock;
 	if (write_access) {
+		//页框值不可写的，因此执行do_wp_page函数。。这是一种很常的发生的情况，比如说
+		//fork之后，都是共享页框，设置页框为只读。然后如果父进程或子进程写了被保护的
+		//页框，就会引起这样的fault。
 		if (!pte_write(entry))
 			return do_wp_page(mm, vma, address,
 					pte, pmd, ptl, entry);
@@ -3002,10 +3141,13 @@ int make_pages_present(unsigned long addr, unsigned long end)
 	BUG_ON(addr >= end);
 	BUG_ON(end > vma->vm_end);
 	len = DIV_ROUND_UP(end, PAGE_SIZE) - addr/PAGE_SIZE;
+	//len为要得到的page数目..
+	//ret返回值为实际上得到的page数目。
 	ret = get_user_pages(current, current->mm, addr,
 			len, write, 0, NULL, NULL);
 	if (ret < 0)
 		return ret;
+	//判断是不是相等。。
 	return ret == len ? 0 : -EFAULT;
 }
 

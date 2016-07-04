@@ -33,6 +33,7 @@ int kobj_map(struct kobj_map *domain, dev_t dev, unsigned long range,
 	     struct module *module, kobj_probe_t *probe,
 	     int (*lock)(dev_t, void *), void *data)
 {
+	//只要range是小于256的..这样计算之后的n = 1..  (dev + range - 1)>>8
 	unsigned n = MAJOR(dev + range - 1) - MAJOR(dev) + 1;
 	unsigned index = MAJOR(dev);
 	unsigned i;
@@ -40,7 +41,6 @@ int kobj_map(struct kobj_map *domain, dev_t dev, unsigned long range,
 
 	if (n > 255)
 		n = 255;
-
 	p = kmalloc(sizeof(struct probe) * n, GFP_KERNEL);
 
 	if (p == NULL)
@@ -52,8 +52,11 @@ int kobj_map(struct kobj_map *domain, dev_t dev, unsigned long range,
 		p->lock = lock;
 		p->dev = dev;
 		p->range = range;
+		//data保存的就是cdev的地址...因此可以找到probe相当于找到了cdev..
 		p->data = data;
 	}
+	//寻找插入到kobj_map的位置..相当于也是一个hash数组...
+	//index在一开始初始化为了主设备号了..那就是主设备号作为查找hash表项..
 	mutex_lock(domain->lock);
 	for (i = 0, p -= n; i < n; i++, p++, index++) {
 		struct probe **s = &domain->probes[index % 255];

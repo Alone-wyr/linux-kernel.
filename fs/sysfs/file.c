@@ -55,6 +55,7 @@ struct sysfs_buffer {
 	char			* page;
 	struct sysfs_ops	* ops;
 	struct mutex		mutex;
+	/*没有执行写，而是直接进行读的时候...此时needs_read_fill会从1置为0*/
 	int			needs_read_fill;
 	int			event;
 	struct list_head	list;
@@ -78,7 +79,7 @@ static int fill_read_buffer(struct dentry * dentry, struct sysfs_buffer * buffer
 	struct sysfs_ops * ops = buffer->ops;
 	int ret = 0;
 	ssize_t count;
-
+	/*如果没有分配页帧来存放数据，那么就分配*/
 	if (!buffer->page)
 		buffer->page = (char *) get_zeroed_page(GFP_KERNEL);
 	if (!buffer->page)
@@ -89,6 +90,7 @@ static int fill_read_buffer(struct dentry * dentry, struct sysfs_buffer * buffer
 		return -ENODEV;
 
 	buffer->event = atomic_read(&attr_sd->s_attr.open->event);
+	/*调用指定的读函数(show) */
 	count = ops->show(kobj, attr_sd->s_attr.attr, buffer->page);
 
 	sysfs_put_active_two(attr_sd);
@@ -104,6 +106,9 @@ static int fill_read_buffer(struct dentry * dentry, struct sysfs_buffer * buffer
 		count = PAGE_SIZE - 1;
 	}
 	if (count >= 0) {
+		/*
+		清零，读填充的标记。同时设置文件的长度
+		*/
 		buffer->needs_read_fill = 0;
 		buffer->count = count;
 	} else {
@@ -134,10 +139,16 @@ static int fill_read_buffer(struct dentry * dentry, struct sysfs_buffer * buffer
 static ssize_t
 sysfs_read_file(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
+	/*根据打开文件的函数可以知道，会分配sysfs_buffer数据结构，并关联到file数据结构*/
 	struct sysfs_buffer * buffer = file->private_data;
 	ssize_t retval = 0;
 
 	mutex_lock(&buffer->mutex);
+	/*
+	fill_read_buffer会分配存放数据的内存(内核空间的).
+	needs_read_fill读的时候填充。比如说没有进行写，直接读。
+	*ppos == 0, 读的ppos为0，也可能需要填充...
+	*/
 	if (buffer->needs_read_fill || *ppos == 0) {
 		retval = fill_read_buffer(file->f_path.dentry,buffer);
 		if (retval)
@@ -145,6 +156,10 @@ sysfs_read_file(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 	}
 	pr_debug("%s: count = %zd, ppos = %lld, buf = %s\n",
 		 __func__, count, *ppos, buffer->page);
+	/*
+	上面已经确定了该属性文件有数据可以读取了..
+	这里就是直接拷贝到用户空间的内存去，同时递增*ppos为读取的长度咯。
+	*/
 	retval = simple_read_from_buffer(buf, count, ppos, buffer->page,
 					 buffer->count);
 out:
@@ -166,7 +181,10 @@ static int
 fill_write_buffer(struct sysfs_buffer * buffer, const char __user * buf, size_t count)
 {
 	int error;
-
+	/*先判断是否为该属性文件分配了内存(内核空间的).
+	  如果没有，那么需要分配。然后在进行写入操作。比如说，第一次对该属性文件的操作就是写
+	  那么可能就没有分配。
+	*/
 	if (!buffer->page)
 		buffer->page = (char *)get_zeroed_page(GFP_KERNEL);
 	if (!buffer->page)
@@ -174,6 +192,7 @@ fill_write_buffer(struct sysfs_buffer * buffer, const char __user * buf, size_t 
 
 	if (count >= PAGE_SIZE)
 		count = PAGE_SIZE - 1;
+	//把数据从用户空间拷贝到内核空间*/
 	error = copy_from_user(buffer->page,buf,count);
 	buffer->needs_read_fill = 1;
 	/* if buf is assumed to contain a string, terminate it by \0,
@@ -347,6 +366,7 @@ static int sysfs_open_file(struct inode *inode, struct file *file)
 		return -ENODEV;
 
 	/* every kobject with an attribute needs a ktype assigned */
+	/*每一个有属性文件的kobj，都要有指向一个ktype，它提供了操作属性文件的函数*/
 	if (kobj->ktype && kobj->ktype->sysfs_ops)
 		ops = kobj->ktype->sysfs_ops;
 	else {
@@ -359,6 +379,7 @@ static int sysfs_open_file(struct inode *inode, struct file *file)
 	 * The inode's perms must say it's ok, 
 	 * and we must have a store method.
 	 */
+	/*要执行写的操作，判断是不是有写的属性，此外判断是不是有写的函数(store)*/
 	if (file->f_mode & FMODE_WRITE) {
 		if (!(inode->i_mode & S_IWUGO) || !ops->store)
 			goto err_out;
@@ -368,6 +389,7 @@ static int sysfs_open_file(struct inode *inode, struct file *file)
 	 * The inode's perms must say it's ok, and we there
 	 * must be a show method for it.
 	 */
+	/*要执行读的操作，判断是不是有读的属性，此外判断是不是有读的函数(show) */
 	if (file->f_mode & FMODE_READ) {
 		if (!(inode->i_mode & S_IRUGO) || !ops->show)
 			goto err_out;
@@ -376,6 +398,7 @@ static int sysfs_open_file(struct inode *inode, struct file *file)
 	/* No error? Great, allocate a buffer for the file, and store it
 	 * it in file->private_data for easy access.
 	 */
+	/*对于每次打开一个文件，都会分配一个sysfs_buffer数据结构。比如记录当前的位置pos*/
 	error = -ENOMEM;
 	buffer = kzalloc(sizeof(struct sysfs_buffer), GFP_KERNEL);
 	if (!buffer)
@@ -384,9 +407,11 @@ static int sysfs_open_file(struct inode *inode, struct file *file)
 	mutex_init(&buffer->mutex);
 	buffer->needs_read_fill = 1;
 	buffer->ops = ops;
+	/*把sysfs_buffer数据结构同file数据结构关联*/
 	file->private_data = buffer;
 
 	/* make sure we have open dirent struct */
+	/*对于一个打开的文件，要分配sysfs_opend_dirent数据结构，多个打开只会分配一次*/
 	error = sysfs_get_open_dirent(attr_sd, buffer);
 	if (error)
 		goto err_free;

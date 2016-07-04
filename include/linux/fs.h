@@ -1310,6 +1310,8 @@ struct super_block {
 	unsigned char		s_blocksize_bits;
 	unsigned char		s_dirt;
 	unsigned long long	s_maxbytes;	/* Max file size */
+	
+	//一个超级块指定了一个文件系统，指向文件系统的类型的数据结构。
 	struct file_system_type	*s_type;
 	const struct super_operations	*s_op;
 	struct dquot_operations	*dq_op;
@@ -1345,7 +1347,7 @@ struct super_block {
 
 	int			s_frozen;
 	wait_queue_head_t	s_wait_unfrozen;
-
+	//由所属文件系统的类型的name字段来赋值。
 	char s_id[32];				/* Informational name */
 
 	void 			*s_fs_info;	/* Filesystem private info */

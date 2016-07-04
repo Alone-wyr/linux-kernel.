@@ -160,7 +160,7 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 	 * evictions by the processes running on the same package. One
 	 * thing we can do is to shuffle the initial stack for them.
 	 */
-
+	//进行对齐.
 	p = arch_align_stack(p);
 
 	/*
@@ -252,10 +252,14 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 
 	/* And advance past the AT_NULL entry.  */
 	ei_index += 2;
-
+	//递增栈,这部分空间存放elf_info...后面可以看到相关代码.
 	sp = STACK_ADD(p, ei_index);
-
+//	argc为程序执行的参数的个数.. 然后加上一个NULL结尾
+//    envc为程序执行的环境变量参数..然后加上一个NULL结尾
+//   还需要存放一个变量argc.. 因此在+1.
 	items = (argc + 1) + (envc + 1) + 1;
+//到这里重新设置了一下bprm->p..前面是预留了空间，下面的代码片段就是填充相关数据到对应的空间了.
+//而且在从内核空间返回用户空间这个sp就是作为用户空间指向的堆栈起始地址啦.
 	bprm->p = STACK_ROUND(sp, items);
 
 	/* Point sp at the lowest address on the stack */
@@ -274,17 +278,24 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 	vma = find_extend_vma(current->mm, bprm->p);
 	if (!vma)
 		return -EFAULT;
-
+	/*这里开始，把原本就在内核空间的数据拷贝到用户堆栈里面*/
 	/* Now, let's put argc (and argv, envp if appropriate) on the stack */
+	//存放argc变量..
 	if (__put_user(argc, sp++))
 		return -EFAULT;
+	//在argc后面接着是参数的指针数组，以NULL结尾.
+	//在后面就是环境变量指针数组，也是为NULL结尾..
+	//下面是确定argv和envp指针数组的起始地址.
 	argv = sp;
 	envp = argv + argc + 1;
 
 	/* Populate argv and envp */
+	//填充argv和envp...arg_start存放的是程序执行的参数..其后接着是环境变量..
+	//都是字符串..
 	p = current->mm->arg_end = current->mm->arg_start;
 	while (argc-- > 0) {
 		size_t len;
+		//设置每个参数指向的地址..
 		if (__put_user((elf_addr_t)p, argv++))
 			return -EFAULT;
 		len = strnlen_user((void __user *)p, MAX_ARG_STRLEN);
@@ -292,11 +303,13 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 			return -EINVAL;
 		p += len;
 	}
+	//填充一个0..因此在遍历参数时候，可以通过是否达到0来做标记..
 	if (__put_user(0, argv))
 		return -EFAULT;
 	current->mm->arg_end = current->mm->env_start = p;
 	while (envc-- > 0) {
 		size_t len;
+		//设置每个环境变量指向的地址..
 		if (__put_user((elf_addr_t)p, envp++))
 			return -EFAULT;
 		len = strnlen_user((void __user *)p, MAX_ARG_STRLEN);
@@ -304,11 +317,13 @@ create_elf_tables(struct linux_binprm *bprm, struct elfhdr *exec,
 			return -EINVAL;
 		p += len;
 	}
+	//填充一个0..因此在遍历环境时候，可以通过是否达到0来做标记..
 	if (__put_user(0, envp))
 		return -EFAULT;
 	current->mm->env_end = p;
 
 	/* Put the elf_info on the stack in the right place.  */
+	//现在把elf_info也填充到栈上..
 	sp = (elf_addr_t __user *)envp + 1;
 	if (copy_to_user(sp, elf_info, ei_index * sizeof(elf_addr_t)))
 		return -EFAULT;
@@ -391,7 +406,7 @@ static unsigned long load_elf_interp(struct elfhdr *interp_elf_ex,
 	unsigned long error = ~0UL;
 	unsigned long total_size;
 	int retval, i, size;
-
+	//程序解释器的type为DYN。
 	/* First of all, some simple consistency checks */
 	if (interp_elf_ex->e_type != ET_EXEC &&
 	    interp_elf_ex->e_type != ET_DYN)
@@ -593,28 +608,32 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 
 	retval = -ENOEXEC;
 	/* First of all, some simple consistency checks */
+	//比较ELF格式的头..
 	if (memcmp(loc->elf_ex.e_ident, ELFMAG, SELFMAG) != 0)
 		goto out;
-
+	//判断文件的类型.是不是可执行文件或是动态库文件.
 	if (loc->elf_ex.e_type != ET_EXEC && loc->elf_ex.e_type != ET_DYN)
 		goto out;
 	if (!elf_check_arch(&loc->elf_ex))
 		goto out;
 	if (!bprm->file->f_op||!bprm->file->f_op->mmap)
-		goto out;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     		goto out;
 
 	/* Now read in all of the header information */
+	//phentsize: program header entry size, 每个程序头表项的长度.
 	if (loc->elf_ex.e_phentsize != sizeof(struct elf_phdr))
 		goto out;
+	//phnum: program header number, 不应该小于1个，也不应该大于(65536/每项大小)个.
 	if (loc->elf_ex.e_phnum < 1 ||
 	 	loc->elf_ex.e_phnum > 65536U / sizeof(struct elf_phdr))
 		goto out;
+	//计算程序头表的长度.
 	size = loc->elf_ex.e_phnum * sizeof(struct elf_phdr);
 	retval = -ENOMEM;
 	elf_phdata = kmalloc(size, GFP_KERNEL);
 	if (!elf_phdata)
 		goto out;
-
+	//phoff: program header offset.从文件读取程序头表
 	retval = kernel_read(bprm->file, loc->elf_ex.e_phoff,
 			     (char *)elf_phdata, size);
 	if (retval != size) {
@@ -631,7 +650,8 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	end_code = 0;
 	start_data = 0;
 	end_data = 0;
-
+	//下面的代码是要遍历程序头表，找到PT_INTERP
+	//找到程序解释器.program interpreter使用给动态库的。
 	for (i = 0; i < loc->elf_ex.e_phnum; i++) {
 		if (elf_ppnt->p_type == PT_INTERP) {
 			/* This is the program interpreter used for
@@ -639,16 +659,19 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 			 * is an a.out format binary
 			 */
 			retval = -ENOEXEC;
+			//filesz: 段在二进制文件的长度.
 			if (elf_ppnt->p_filesz > PATH_MAX || 
 			    elf_ppnt->p_filesz < 2)
 				goto out_free_ph;
 
 			retval = -ENOMEM;
+			//分配段内容长度的空间.filesz,指定了段在二进制文件中的长度....
 			elf_interpreter = kmalloc(elf_ppnt->p_filesz,
 						  GFP_KERNEL);
 			if (!elf_interpreter)
 				goto out_free_ph;
-
+			//从二进制文件中读取该段的内容. p_offset,段在二进制文件的偏移。	
+			//其实该段存放的就是程序加载器的名称，比如/lib/ld-linux.so.2
 			retval = kernel_read(bprm->file, elf_ppnt->p_offset,
 					     elf_interpreter,
 					     elf_ppnt->p_filesz);
@@ -682,7 +705,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 			 * flush_thread().	- akpm
 			 */
 			SET_PERSONALITY(loc->elf_ex);
-
+			//打开这个解释器文件.elf_interpreter为该解释器的路径.
 			interpreter = open_exec(elf_interpreter);
 			retval = PTR_ERR(interpreter);
 			if (IS_ERR(interpreter))
@@ -695,7 +718,8 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 			 */
 			if (file_permission(interpreter, MAY_READ) < 0)
 				bprm->interp_flags |= BINPRM_FLAGS_ENFORCE_NONDUMP;
-
+			//interpreter指定了文件，0为读取的偏移，buf为存放数据的空间,BINPRM_BUF_SIZE为大小。
+			//读取解释器的ELF文件头
 			retval = kernel_read(interpreter, 0, bprm->buf,
 					     BINPRM_BUF_SIZE);
 			if (retval != BINPRM_BUF_SIZE) {
@@ -710,7 +734,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		}
 		elf_ppnt++;
 	}
-
+	//找到PT_GNU_STACK的段，但是现在不知道它是什么叼用。
 	elf_ppnt = elf_phdata;
 	for (i = 0; i < loc->elf_ex.e_phnum; i++, elf_ppnt++)
 		if (elf_ppnt->p_type == PT_GNU_STACK) {
@@ -725,6 +749,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	if (elf_interpreter) {
 		retval = -ELIBBAD;
 		/* Not an ELF interpreter */
+		//前面打开过解释器文件，这里检测它ELF头。
 		if (memcmp(loc->interp_elf_ex.e_ident, ELFMAG, SELFMAG) != 0)
 			goto out_free_dentry;
 		/* Verify the interpreter has a valid arch */
@@ -741,6 +766,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		goto out_free_dentry;
 
 	/* OK, This is the point of no return */
+	//在fork的时候会设置该标记，然后在execute的时候清楚该标记.
 	current->flags &= ~PF_FORKNOEXEC;
 	current->mm->def_flags = def_flags;
 
@@ -752,12 +778,14 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 
 	if (!(current->personality & ADDR_NO_RANDOMIZE) && randomize_va_space)
 		current->flags |= PF_RANDOMIZE;
+	//选择一个mmap的布局，后面需要进行do_mmap来分配各个segment了。
 	arch_pick_mmap_layout(current->mm);
 
 	/* Do this so that we can load the interpreter, if need be.  We will
 	   change some of these later */
 	current->mm->free_area_cache = current->mm->mmap_base;
 	current->mm->cached_hole_size = 0;
+	//设置栈区域...
 	retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
 				 executable_stack);
 	if (retval < 0) {
@@ -773,7 +801,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	    i < loc->elf_ex.e_phnum; i++, elf_ppnt++) {
 		int elf_prot = 0, elf_flags;
 		unsigned long k, vaddr;
-
+		//程序段不可以加载.
 		if (elf_ppnt->p_type != PT_LOAD)
 			continue;
 
@@ -848,6 +876,14 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 				reloc_func_desc = load_bias;
 			}
 		}
+		/*
+		start_code就是标识为LOAD段的最低地址，也就是代码段的起始地址.
+		对于可执行文件的段只有2个是LOAD类型，一个是代码段，一个是数据段.
+		假设代码段[a - b] 数据段[c - d].
+		读取代码段: start_code = a, start_data = a.
+		读取数据段: start_code = a, start_data = c.
+		因此就是这样的结果。分别记录代码段和数据段的起始地址。
+		*/
 		k = elf_ppnt->p_vaddr;
 		if (k < start_code)
 			start_code = k;
@@ -867,9 +903,23 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 			retval = -EINVAL;
 			goto out_free_dentry;
 		}
+		/*
+		p_filesz正常来说都是大于p_memsz.前者的大小是二进制在文件的大小，后者代表需要添加到
+		内存的大小。比如说对于LOAD的数据段，有如下的数据:
+		p_filesz = 0x11b p_memsz = 0x211c.那么可以计算BSS区域的大小了 0x211c - 0x11b + 1 = 8194
+		*/
+		/*
+		可以认为:
+		elf_bss存放bss区域的起始地址.
+		end_code存放代码段的结束地址.
+		end_data存放数据段的结束地址.(一般而言也是bss段的起始地址)
+		elf_brk存放head段的起始地址.
 
+		看前面的例子:
+		读取代码段: elf_bss = b. end_code = b. end_data = b. elf_brk = b.
+		读取数据段: elf_bss = e. end_code = b. end_data = e. elf_brk的值会等于加上bss区域.(p_memsz).
+		*/
 		k = elf_ppnt->p_vaddr + elf_ppnt->p_filesz;
-
 		if (k > elf_bss)
 			elf_bss = k;
 		if ((elf_ppnt->p_flags & PF_X) && end_code < k)
@@ -905,9 +955,15 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		goto out_free_dentry;
 	}
 
+	/*
+	下面一个很重要的地方就是设置程序入口地址..elf_entry ..
+	当有需要进行动态库解释的时候，设置的为解释器的入口..那就是会先进入到解释器的程序中执行。
+	否则设置为目标镜像本身的程序入口.
+	*/
 	if (elf_interpreter) {
 		unsigned long uninitialized_var(interp_map_addr);
-
+		//第一个参数是程序解释器的header.
+		//第二个参数就是程序解释器的file数据结构.
 		elf_entry = load_elf_interp(&loc->interp_elf_ex,
 					    interpreter,
 					    &interp_map_addr,
@@ -954,6 +1010,12 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 
 	install_exec_creds(bprm);
 	current->flags &= ~PF_FORKNOEXEC;
+	/*
+	 在完成装入，启动用户空间的映像运行之前，还需要为目标映像和解释器准备好一些有关的信息，
+	 这些信息包括常规的argc、argv[]、envc、envp[]、还有一些所谓的“辅助向量(Auxiliary Vector)”。
+	 这些信息已经存在于内核中，但是需要把它们复制到用户空间，使它们在CPU进入解释器或目标映像的
+	 程序入口时出现在用户空间堆栈上。这里的create_elf_tables()就起着这个作用。
+	*/
 	retval = create_elf_tables(bprm, &loc->elf_ex,
 			  load_addr, interp_load_addr);
 	if (retval < 0) {
@@ -997,6 +1059,22 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	 */
 	ELF_PLAT_INIT(regs, reloc_func_desc);
 #endif
+	/*这里是最后一步了，跳转到之前设置的执行起点*/
+
+/*
+#define start_thread(regs, new_eip, new_esp) do {          \
+		   __asm__("movl %0,%%fs ; movl %0,%%gs": :"r" (0));	 \
+		   set_fs(USER_DS); 							\
+		   regs->xds = __USER_DS;								  \
+		   regs->xes = __USER_DS;								  \
+		   regs->xss = __USER_DS;								  \
+		   regs->xcs = __USER_CS;								  \
+		   很重要的是这里设置新的程序入口和新的堆栈地址...(用户空间的堆栈)
+		   可以认为是从内核空间返回到空户空间，现在就是恢复进入到内核空间的上下文...
+		   regs->eip = new_eip; 								\
+		   regs->esp = new_esp; 							   \
+	} while (0)
+*/
 
 	start_thread(regs, elf_entry, bprm->p);
 	retval = 0;

@@ -51,7 +51,9 @@ extern void bus_remove_file(struct bus_type *, struct bus_attribute *);
 
 struct bus_type {
 	const char		*name;
+//注册总线的时候，创建文件到该总线的目录下。（bus_add_attrs）
 	struct bus_attribute	*bus_attrs;
+//设备注册到该总线上，那么需要在该设备的内核对象目录下创建的文件。（device_add_attrs）
 	struct device_attribute	*dev_attrs;
 	struct driver_attribute	*drv_attrs;
 

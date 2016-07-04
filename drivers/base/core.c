@@ -570,7 +570,7 @@ static inline void cleanup_glue_dir(struct device *dev,
 static struct kobject *virtual_device_parent(struct device *dev)
 {
 	static struct kobject *virtual_dir = NULL;
-
+	//  /sys/devices/virtual目录的创建...
 	if (!virtual_dir)
 		virtual_dir = kobject_create_and_add("virtual",
 						     &devices_kset->kobj);
@@ -660,7 +660,7 @@ static int device_add_class_symlinks(struct device *dev)
 
 	if (!dev->class)
 		return 0;
-
+	//设备对象目录下创建链接文件subsystem指向分类对象目录。
 	error = sysfs_create_link(&dev->kobj,
 				  &dev->class->p->class_subsys.kobj,
 				  "subsystem");
@@ -715,11 +715,12 @@ out_busid:
 				  dev_name(dev));
 #else
 	/* link in the class directory pointing to the device */
+	//分类对象目录创建链接文件链接到设备对象目录下。
 	error = sysfs_create_link(&dev->class->p->class_subsys.kobj,
 				  &dev->kobj, dev_name(dev));
 	if (error)
 		goto out_subsys;
-
+	//如果有父设备，且当前注册的设备不是分区。。那么创建device链接到父设备..
 	if (dev->parent && device_is_not_partition(dev)) {
 		error = sysfs_create_link(&dev->kobj, &dev->parent->kobj,
 					  "device");
@@ -811,6 +812,8 @@ static struct kobject *device_to_dev_kobj(struct device *dev)
 
 static int device_create_sys_dev_entry(struct device *dev)
 {
+	//在返回的kobj目录下创建一个链接文件...链接文件名为: major:minon
+	//比如说: /sys/dev/char/目录下就很多这样的链接文件.
 	struct kobject *kobj = device_to_dev_kobj(dev);
 	int error = 0;
 	char devt_str[15];

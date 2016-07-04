@@ -532,8 +532,12 @@ static struct inode *find_inode(struct super_block *sb,
 
 repeat:
 	hlist_for_each_entry(inode, node, head, i_hash) {
+		//判断超级块是不是相等...相当于确定同一个文件系统.
 		if (inode->i_sb != sb)
 			continue;
+		//对于sysfs来说，调用函数sysfs_ilookup_test
+		//就是在判断inode的ino和data(sysfs_dirent)保存的ino是不是相等。
+		//因为ino在一个文件系统内是唯一的。因为如果相当，就代表找到了对应的inode了。
 		if (!test(inode, data))
 			continue;
 		if (inode->i_state & (I_FREEING|I_CLEAR|I_WILL_FREE)) {

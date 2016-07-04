@@ -68,6 +68,7 @@ struct kobject {
 	unsigned int state_in_sysfs:1;
 	unsigned int state_add_uevent_sent:1;
 	unsigned int state_remove_uevent_sent:1;
+	//suppress是压抑的意思，是不是跳过event
 	unsigned int uevent_suppress:1;
 };
 
@@ -116,8 +117,14 @@ struct kobj_uevent_env {
 	char buf[UEVENT_BUFFER_SIZE];
 	int buflen;
 };
-
+/*
+这三个函数都与uevent相关。
+filter用于判断uevent是否要发出去。
+name用于得到subsystem的名字。
+uevent用于填充env变量。
+*/
 struct kset_uevent_ops {
+	//filter返回为0，要skip 掉event.
 	int (*filter)(struct kset *kset, struct kobject *kobj);
 	const char *(*name)(struct kset *kset, struct kobject *kobj);
 	int (*uevent)(struct kset *kset, struct kobject *kobj,

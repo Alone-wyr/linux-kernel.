@@ -300,7 +300,7 @@ static int kobject_add_varg(struct kobject *kobj, struct kobject *parent,
 			    const char *fmt, va_list vargs)
 {
 	int retval;
-
+	//传递过来的vargs存放着name..保存到kobj字段中去。
 	retval = kobject_set_name_vargs(kobj, fmt, vargs);
 	if (retval) {
 		printk(KERN_ERR "kobject: can not set name properly!\n");
@@ -318,13 +318,16 @@ static int kobject_add_varg(struct kobject *kobj, struct kobject *parent,
  *
  * The kobject name is set and added to the kobject hierarchy in this
  * function.
- *
+ * 参数name会设置到kobject的name字段，作为目录的名称。
  * If @parent is set, then the parent of the @kobj will be set to it.
  * If @parent is NULL, then the parent of the @kobj will be set to the
  * kobject associted with the kset assigned to this kobject.  If no kset
  * is assigned to the kobject, then the kobject will be located in the
  * root of the sysfs tree.
- *
+ * 这个目录的父目录确定规则:
+ 	1.如果有parent，那就作为parent下面子目录
+ 	2.如果parent为NULL,它就把kset的kobj作为父目录.
+ 	3.如果parent为NULL,kset也没有，就让根目录作为父目录.
  * If this function returns an error, kobject_put() must be called to
  * properly clean up the memory associated with the object.
  * Under no instance should the kobject that is passed to this function

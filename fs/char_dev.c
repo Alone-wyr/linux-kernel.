@@ -95,7 +95,8 @@ __register_chrdev_region(unsigned int major, unsigned int baseminor,
 	struct char_device_struct *cd, **cp;
 	int ret = 0;
 	int i;
-
+	//<----------------
+	//下面的代码就是确定一个主设备号....
 	cd = kzalloc(sizeof(struct char_device_struct), GFP_KERNEL);
 	if (cd == NULL)
 		return ERR_PTR(-ENOMEM);
@@ -121,9 +122,16 @@ __register_chrdev_region(unsigned int major, unsigned int baseminor,
 	cd->baseminor = baseminor;
 	cd->minorct = minorct;
 	strlcpy(cd->name, name, sizeof(cd->name));
-
+	//------------------------------>
+	
+	//确定完主设备号后，现在确定是不是次设备号产生冲突..
+	//相当于一个hash表，i就是hash数组的索引，确定索引后就确定了一个链表.
+	//这个链表链接着属于该主设备号的设备.字段baseminor保存此设备号起始..minorct保存此设备号的数目.
+	//同一个hash表项的链表按major的递增顺序存放...
+	//而相同的major，按此设备号的baseminor的大小进行递增排序..
+	//假设加入有A(major = 2, baseminor = 0) / B(major = 257, baseminor = 0) / C(major = 257, baseminor = 1)
+	//那么chrdevs[2]的链表分别为A->B->C.
 	i = major_to_index(major);
-
 	for (cp = &chrdevs[i]; *cp; cp = &(*cp)->next)
 		if ((*cp)->major > major ||
 		    ((*cp)->major == major &&
@@ -150,7 +158,7 @@ __register_chrdev_region(unsigned int major, unsigned int baseminor,
 			goto out;
 		}
 	}
-
+	//插入到链表当中去...
 	cd->next = *cp;
 	*cp = cd;
 	mutex_unlock(&chrdevs_lock);
@@ -259,6 +267,8 @@ int alloc_chrdev_region(dev_t *dev, unsigned baseminor, unsigned count,
  * This function registers a range of 256 minor numbers. The first minor number
  * is 0.
  */
+ //这个函数会注册[0-255]范围的次设备号..主设备号又参数指向或者当参数为0的时候
+ //由程序动态分配咯。
 int register_chrdev(unsigned int major, const char *name,
 		    const struct file_operations *fops)
 {
@@ -266,17 +276,18 @@ int register_chrdev(unsigned int major, const char *name,
 	struct cdev *cdev;
 	char *s;
 	int err = -ENOMEM;
-
+	//为注册的字符设备分配设备号..主设备号就是参数major，设备号256个，范围为[0-255].
 	cd = __register_chrdev_region(major, 0, 256, name);
 	if (IS_ERR(cd))
 		return PTR_ERR(cd);
-	
+	//设备cdev数据结构，并会初始化内部的kobj。
 	cdev = cdev_alloc();
 	if (!cdev)
 		goto out2;
 
 	cdev->owner = fops->owner;
 	cdev->ops = fops;
+	//设置kobj的name字段，也就是显示在sys目录下的目录名称.
 	kobject_set_name(&cdev->kobj, "%s", name);
 	for (s = strchr(kobject_name(&cdev->kobj),'/'); s; s = strchr(s, '/'))
 		*s = '!';
@@ -353,21 +364,31 @@ void cdev_put(struct cdev *p)
 /*
  * Called every time a character special file is opened
  */
+ /*
+ 当创建一个设备节点的时候，设备节点的inode的i_fop指向def_chr_fops函数集合(其实该集合只定义了该函数)
+ 当尝试去打开设备节点的时候，就会调用到该函数。然后该函数来处理和字符设备定义的函数集合
+ 的关联
+ */
 static int chrdev_open(struct inode *inode, struct file *filp)
 {
 	struct cdev *p;
 	struct cdev *new = NULL;
 	int ret = 0;
-
+	//<------------------------------
+	//下面这部分代码就是来确定和inode关联的字符设备..
 	spin_lock(&cdev_lock);
 	p = inode->i_cdev;
 	if (!p) {
+		//一般来说就是NULL。
 		struct kobject *kobj;
 		int idx;
 		spin_unlock(&cdev_lock);
+		//设备文件的inode字段i_rdev存放的就是设备号..所以根据设备号在cdev_map中查找到字符设备
+		//所属的对象。kobj
 		kobj = kobj_lookup(cdev_map, inode->i_rdev, &idx);
 		if (!kobj)
 			return -ENXIO;
+		//kobj是被结构体cdev包含的..通过kobj找到cdev。然而字符设备的函数集合就是保存在cdev的ops字段.
 		new = container_of(kobj, struct cdev, kobj);
 		spin_lock(&cdev_lock);
 		/* Check i_cdev again in case somebody beat us to it while
@@ -386,12 +407,15 @@ static int chrdev_open(struct inode *inode, struct file *filp)
 	cdev_put(new);
 	if (ret)
 		return ret;
+	///-------------------------------END>
 
+	//下面就是把字符设备的函数集合赋值到file的f_op字段上。后续的操作相当于调用了字符设备的函数集合
+	//也就相当于file指向了指定的字符设备的函数集合了。不在是def_chr_fops了。
 	ret = -ENXIO;
 	filp->f_op = fops_get(p->ops);
 	if (!filp->f_op)
 		goto out_cdev_put;
-
+	//最后，就是调用字符设备的open函数了。
 	if (filp->f_op->open) {
 		ret = filp->f_op->open(inode,filp);
 		if (ret)

@@ -22,7 +22,9 @@
 #include <asm/tlbflush.h>
 
 #include "internal.h"
-
+//清楚pte的内容，比如说需要非连续文件的映射..就会涉及到这个操作
+//但是pte可能也有映射到某个物理页框..那么还需要释放掉它，比如下面调用到de
+//page_remove_rmap... page_cache_release..
 static void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 			unsigned long addr, pte_t *ptep)
 {
@@ -37,7 +39,9 @@ static void zap_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 		if (page) {
 			if (pte_dirty(pte))
 				set_page_dirty(page);
+			//__mapcount..
 			page_remove_rmap(page);
+			//__count.
 			page_cache_release(page);
 			update_hiwater_rss(mm);
 			dec_mm_counter(mm, file_rss);
@@ -63,10 +67,10 @@ static int install_file_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 	pte = get_locked_pte(mm, addr, &ptl);
 	if (!pte)
 		goto out;
-
+	//先清除涉及到的页表项。
 	if (!pte_none(*pte))
 		zap_pte(mm, vma, addr, pte);
-
+	//pgoff_to_pte来设置一个新页表项。
 	set_pte_at(mm, addr, pte, pgoff_to_pte(pgoff));
 	/*
 	 * We don't need to run update_mmu_cache() here because the "file pte"
@@ -80,7 +84,7 @@ static int install_file_pte(struct mm_struct *mm, struct vm_area_struct *vma,
 out:
 	return err;
 }
-
+//当前偏移量为pgoff，长度为size，将映射到addr指定的虚拟地址处。。。
 static int populate_range(struct mm_struct *mm, struct vm_area_struct *vma,
 			unsigned long addr, unsigned long size, pgoff_t pgoff)
 {
@@ -159,6 +163,7 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 	 * the single existing vma.  vm_private_data is used as a
 	 * swapout cursor in a VM_NONLINEAR vma.
 	 */
+	 //确定是VMA区是共享的。
 	if (!vma || !(vma->vm_flags & VM_SHARED))
 		goto out;
 
@@ -167,11 +172,12 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 
 	if (!(vma->vm_flags & VM_CAN_NONLINEAR))
 		goto out;
-
+	//start和end在vma的这个线性区区间内。
 	if (end <= start || start < vma->vm_start || end > vma->vm_end)
 		goto out;
 
 	/* Must set VM_NONLINEAR before any pages are populated. */
+	//判断该VMA之前是不是进行过非线性的映射。
 	if (!(vma->vm_flags & VM_NONLINEAR)) {
 		/* Don't need a nonlinear mapping, exit success */
 		if (pgoff == linear_page_index(vma, start)) {
@@ -210,8 +216,11 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 		}
 		spin_lock(&mapping->i_mmap_lock);
 		flush_dcache_mmap_lock(mapping);
+		//设置该标记记录着该VMA线性区为非线性映射。
 		vma->vm_flags |= VM_NONLINEAR;
+		//从优先树上取下结点，对于非线性映射的VMA，不会在优先树上的。
 		vma_prio_tree_remove(vma, &mapping->i_mmap);
+		//VMA的vma->shared.vm_set.list字段作为结点添加到i_mmap_nonlinear链表上。
 		vma_nonlinear_insert(vma, &mapping->i_mmap_nonlinear);
 		flush_dcache_mmap_unlock(mapping);
 		spin_unlock(&mapping->i_mmap_lock);
@@ -227,8 +236,11 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 	}
 
 	mmu_notifier_invalidate_range_start(mm, start, start + size);
+	//重点就是下面这个函数，进行设置页表项。
 	err = populate_range(mm, vma, start, size, pgoff);
 	mmu_notifier_invalidate_range_end(mm, start, start + size);
+	//如果设置为非阻塞的，(MAP_NONBLOCK被清除的clear)那么需要对刚才非线性映射的区域所包含的页都调用缺页异常
+	//来分配页框，读入数据.由函数make_pages_present来完成。
 	if (!err && !(flags & MAP_NONBLOCK)) {
 		if (vma->vm_flags & VM_LOCKED) {
 			/*

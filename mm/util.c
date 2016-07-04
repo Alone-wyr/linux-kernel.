@@ -214,6 +214,8 @@ char *strndup_user(const char __user *s, long n)
 }
 EXPORT_SYMBOL(strndup_user);
 
+//如果体系结构想在mmap区域布局之间作出选择
+//则需要定义HAVE_ARCH_PICK_MMAP_LAYOUT并提供arch_pick_mmap_layout函数.
 #ifndef HAVE_ARCH_PICK_MMAP_LAYOUT
 void arch_pick_mmap_layout(struct mm_struct *mm)
 {

@@ -608,11 +608,11 @@ static BUS_ATTR(drivers_autoprobe, S_IWUSR | S_IRUGO,
 static int add_probe_files(struct bus_type *bus)
 {
 	int retval;
-
+	//添加drivers_probe文件。
 	retval = bus_create_file(bus, &bus_attr_drivers_probe);
 	if (retval)
 		goto out;
-
+	//添加drivers_autoprobe文件。
 	retval = bus_create_file(bus, &bus_attr_drivers_autoprobe);
 	if (retval)
 		bus_remove_file(bus, &bus_attr_drivers_probe);
@@ -887,7 +887,7 @@ int bus_register(struct bus_type *bus)
 	bus->p = priv;
 
 	BLOCKING_INIT_NOTIFIER_HEAD(&priv->bus_notifier);
-
+	//设置这个目录的名称...
 	retval = kobject_set_name(&priv->subsys.kobj, "%s", bus->name);
 	if (retval)
 		goto out;
@@ -895,36 +895,36 @@ int bus_register(struct bus_type *bus)
 	priv->subsys.kobj.kset = bus_kset;
 	priv->subsys.kobj.ktype = &bus_ktype;
 	priv->drivers_autoprobe = 1;
-
+	//注册到sysfs中，设置了kset了，就相当于确定了父目录...
 	retval = kset_register(&priv->subsys);
 	if (retval)
 		goto out;
-
+	//前面已经注册到了sysfs下，并且创建了目录。这里是在该目录下创建uevent文件。
 	retval = bus_create_file(bus, &bus_attr_uevent);
 	if (retval)
 		goto bus_uevent_fail;
-
+	//在目录下创建子目录"devices"，对象为集合kset...
 	priv->devices_kset = kset_create_and_add("devices", NULL,
 						 &priv->subsys.kobj);
 	if (!priv->devices_kset) {
 		retval = -ENOMEM;
 		goto bus_devices_fail;
 	}
-
+	//在目录下创建子目录"drivers"，对象为集合kset...
 	priv->drivers_kset = kset_create_and_add("drivers", NULL,
 						 &priv->subsys.kobj);
 	if (!priv->drivers_kset) {
 		retval = -ENOMEM;
 		goto bus_drivers_fail;
 	}
-
+	//初始化用于链接所有设备和驱动的链表..
 	klist_init(&priv->klist_devices, klist_devices_get, klist_devices_put);
 	klist_init(&priv->klist_drivers, NULL, NULL);
 
 	retval = add_probe_files(bus);
 	if (retval)
 		goto bus_probe_files_fail;
-
+	//如果定义了bus_attrs，就添加指向的文件。
 	retval = bus_add_attrs(bus);
 	if (retval)
 		goto bus_attrs_fail;

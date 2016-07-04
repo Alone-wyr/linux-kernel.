@@ -8,7 +8,7 @@
  * This is defined the same way as ffs.
  * Note fls(0) = 0, fls(1) = 1, fls(0x80000000) = 32.
  */
-
+//查找最后一个被设置的bit的位置..
 static __always_inline int fls(int x)
 {
 	int r = 32;

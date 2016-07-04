@@ -47,7 +47,10 @@ extern void set_pmd_pfn(unsigned long, unsigned long, pgprot_t);
 #else
 # include <asm/pgtable-2level.h>
 #endif
-
+//把PTE目录放在高端地址...
+//如果放在了高端地址，那么对它的操作还需要临时映射到内核空间咯
+//可以看到如果定义了那么宏pte_unmap就不仅仅是空了.
+//它相当于调用kunmap去释放..
 #if defined(CONFIG_HIGHPTE)
 #define pte_offset_map(dir, address)					\
 	((pte_t *)kmap_atomic_pte(pmd_page(*(dir)), KM_PTE0) +		\

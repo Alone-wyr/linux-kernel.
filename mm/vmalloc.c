@@ -258,7 +258,7 @@ struct vmap_area {
 	struct rb_node rb_node;		/* address sorted rbtree */
 	struct list_head list;		/* address sorted list */
 	struct list_head purge_list;	/* "lazy purge" list */
-	void *private;
+	void *private;	//指向struct vm_struct数据结构...
 	struct rcu_head rcu_head;
 };
 
@@ -411,6 +411,8 @@ overflow:
 	va->va_start = addr;
 	va->va_end = addr + size;
 	va->flags = 0;
+	//添加到红黑树和list上，通过字段rb_node和list.
+	//vmap_area_list和vmap_area_root作为链表和红黑树的head.
 	__insert_vmap_area(va);
 	spin_unlock(&vmap_area_lock);
 
@@ -601,6 +603,7 @@ static void free_unmap_vmap_area_noflush(struct vmap_area *va)
  */
 static void free_unmap_vmap_area(struct vmap_area *va)
 {
+	//应该是释放掉这个区域的cache。。。
 	flush_cache_vunmap(va->va_start, va->va_end);
 	free_unmap_vmap_area_noflush(va);
 }
@@ -1146,7 +1149,7 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 	size = PAGE_ALIGN(size);
 	if (unlikely(!size))
 		return NULL;
-
+	//每个非连续映射区域都会分配一个vm_struct数据结构。
 	area = kmalloc_node(sizeof(*area), gfp_mask & GFP_RECLAIM_MASK, node);
 	if (unlikely(!area))
 		return NULL;
@@ -1154,6 +1157,7 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 	/*
 	 * We always allocate a guard page.
 	 */
+	//两两非连续映射区域之间都会有一个safty interval(安全间隙)，大小为一页大小。
 	size += PAGE_SIZE;
 
 	va = alloc_vmap_area(size, align, start, end, node, gfp_mask);
@@ -1172,6 +1176,7 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 	va->private = area;
 	va->flags |= VM_VM_AREA;
 
+	//vm_struct 也添加到链表vmlist，其实就是按照升序的..
 	write_lock(&vmlist_lock);
 	for (p = &vmlist; (tmp = *p) != NULL; p = &tmp->next) {
 		if (tmp->addr >= area->addr)
@@ -1389,10 +1394,12 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 {
 	struct page **pages;
 	unsigned int nr_pages, array_size, i;
-
+	//area->size包含了一个safety interval.因此要扣掉..
 	nr_pages = (area->size - PAGE_SIZE) >> PAGE_SHIFT;
 	array_size = (nr_pages * sizeof(struct page *));
 
+	//分配一个指针数组，用来存放非线性地址映射的物理内存的描述符..
+	//nr_pages为映射的数目...
 	area->nr_pages = nr_pages;
 	/* Please note that the recursion is strictly bounded. */
 	if (array_size > PAGE_SIZE) {
@@ -1411,7 +1418,8 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		kfree(area);
 		return NULL;
 	}
-
+	//这里进行物理内存的分配，并且赋值前面分配的指针数组。
+	//每一项指向一个内存描述符。
 	for (i = 0; i < area->nr_pages; i++) {
 		struct page *page;
 
@@ -1427,7 +1435,10 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		}
 		area->pages[i] = page;
 	}
-
+	//这个函数主要就是设置init进行的页表(第四个GB)，映射到分配的物理内存上去.
+	//需要注意的是，不是映射到当前进程的内核空间，而是init进程的
+	//如果某个进程访问这个映射的区域，可能会发生缺页异常.
+	//在缺页异常会处理这个动作。
 	if (map_vm_area(area, prot, &pages))
 		goto fail;
 	return area->addr;
@@ -1463,7 +1474,9 @@ static void *__vmalloc_node(unsigned long size, gfp_t gfp_mask, pgprot_t prot,
 	size = PAGE_ALIGN(size);
 	if (!size || (size >> PAGE_SHIFT) > num_physpages)
 		return NULL;
-
+	//这里也需要注意一下VM_ALLOC标记，vmalloc()设置VM_ALLOC
+	//vmap() -> VM_MAP
+	//ioremap()->VM_IOREMAP
 	area = __get_vm_area_node(size, VM_ALLOC, VMALLOC_START, VMALLOC_END,
 						node, gfp_mask, caller);
 
@@ -1489,6 +1502,8 @@ EXPORT_SYMBOL(__vmalloc);
  *	For tight control over page level allocator and protection flags
  *	use __vmalloc() instead.
  */
+ //需要注意的是，标记flas或上了__GFP_HIGHMEM，代表优先从高端内存地址分配内存。
+ //它和vmalloc_32函数的区别就在这个标记上，vmalloc_32函数从NORMAL和DMA区域上进行分配内存。
 void *vmalloc(unsigned long size)
 {
 	return __vmalloc_node(size, GFP_KERNEL | __GFP_HIGHMEM, PAGE_KERNEL,

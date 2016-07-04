@@ -312,10 +312,10 @@ static int __init mark_bootmem(unsigned long start, unsigned long end,
 			mark_bootmem(start, pos, 0, 0);
 			return err;
 		}
-
-		if (max == end)
+		
+		if (max == end)	//start - end区间释放，可能会跨越了内存结点 
 			return 0;
-		pos = bdata->node_low_pfn;
+		pos = bdata->node_low_pfn;	//设置地点为该内存结点最高页编号,继续释放.
 	}
 	BUG();
 }

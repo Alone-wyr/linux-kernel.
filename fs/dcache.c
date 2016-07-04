@@ -951,15 +951,21 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	INIT_LIST_HEAD(&dentry->d_lru);
 	INIT_LIST_HEAD(&dentry->d_subdirs);
 	INIT_LIST_HEAD(&dentry->d_alias);
-
+/*
+如果是要创建根目录的dentry，那么parent就会设置为NULL。因为它是最顶级的目录，没有
+父目录咯.
+*/
 	if (parent) {
+		//d_parent指向父目录.
 		dentry->d_parent = dget(parent);
+		//同一个文件系统下的..指向同一个超级块.
 		dentry->d_sb = parent->d_sb;
 	} else {
 		INIT_LIST_HEAD(&dentry->d_u.d_child);
 	}
 
 	spin_lock(&dcache_lock);
+	//添加到父目录的d_subdirs...作为父目录下的子目录.
 	if (parent)
 		list_add(&dentry->d_u.d_child, &parent->d_subdirs);
 	dentry_stat.nr_dentry++;
@@ -981,6 +987,7 @@ struct dentry *d_alloc_name(struct dentry *parent, const char *name)
 /* the caller must hold dcache_lock */
 static void __d_instantiate(struct dentry *dentry, struct inode *inode)
 {
+	//添加到inode的i_dentry的链表中去...因为一个inode可能对应有多个文件(链接).
 	if (inode)
 		list_add(&dentry->d_alias, &inode->i_dentry);
 	dentry->d_inode = inode;
@@ -1101,6 +1108,8 @@ struct dentry * d_alloc_root(struct inode * root_inode)
 		if (res) {
 			res->d_sb = root_inode->i_sb;
 			res->d_parent = res;
+			//下面函数调用，最重要的是让dentry和inode联系起来..
+			//dentry->d_inode = inode;
 			d_instantiate(res, root_inode);
 		}
 	}

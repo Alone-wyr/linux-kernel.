@@ -177,7 +177,8 @@ static inline void copy_user_highpage(struct page *to, struct page *from,
 	unsigned long vaddr, struct vm_area_struct *vma)
 {
 	char *vfrom, *vto;
-
+	//因为这几个页框都可能是存在于高端地址的..
+	//因此需要先进行kmap的映射。在进行拷贝动作。
 	vfrom = kmap_atomic(from, KM_USER0);
 	vto = kmap_atomic(to, KM_USER1);
 	copy_user_page(vto, vfrom, vaddr, to);

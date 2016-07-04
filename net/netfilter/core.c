@@ -134,7 +134,9 @@ unsigned int nf_iterate(struct list_head *head,
 
 		/* Optimization: we don't need to hold module
 		   reference here, since function can't sleep. --RR */
+		   //调用钩子函数....
 		verdict = elem->hook(hook, skb, indev, outdev, okfn);
+		//返回值不等ACCEPT..因为等于ACCEPT的话..直接继续处理下一个规则.
 		if (verdict != NF_ACCEPT) {
 #ifdef CONFIG_NETFILTER_DEBUG
 			if (unlikely((verdict & NF_VERDICT_MASK)
@@ -144,17 +146,25 @@ unsigned int nf_iterate(struct list_head *head,
 				continue;
 			}
 #endif
+		//如果等于REPEAT...那就重新调用一次该hook函数..下面的
+		//*i = (*i)->prev可以看到...至于其他的值.就直接返回了..
+		//因此等于 NF_DROP  NF_STOLEN NF_QUEUE  NF_STOP 就直接返回...
 			if (verdict != NF_REPEAT)
 				return verdict;
 			*i = (*i)->prev;
 		}
 	}
+	//这里的话..就是所有的hook函数都直接执行了...可能所有的hook都返回的ACCEPT吧...
+	//我认为在iptables里面的每个链都有默认策略...那其他它也是一个hook函数..可能就是放在
+	//hook链表的结尾吧..priority最低的那种...因此这里ACCEPT的返回..其实也是执行了默认策略了的..
 	return NF_ACCEPT;
 }
 
 
 /* Returns 1 if okfn() needs to be executed by the caller,
- * -EPERM for NF_DROP, 0 otherwise. */
+ * -EPERM for NF_DROP, 0 otherwise. 
+    该函数的返回值尤其的重要..返回为1的情况就会调用okfn指定的函数.
+ */
 int nf_hook_slow(u_int8_t pf, unsigned int hook, struct sk_buff *skb,
 		 struct net_device *indev,
 		 struct net_device *outdev,
@@ -167,14 +177,16 @@ int nf_hook_slow(u_int8_t pf, unsigned int hook, struct sk_buff *skb,
 
 	/* We may already have this, but read-locks nest anyway */
 	rcu_read_lock();
-
+	//协议和hookd点确定一个hook函数的链表..
 	elem = &nf_hooks[pf][hook];
 next_hook:
 	verdict = nf_iterate(&nf_hooks[pf][hook], skb, hook, indev,
 			     outdev, &elem, okfn, hook_thresh);
 	if (verdict == NF_ACCEPT || verdict == NF_STOP) {
+		//转而去执行okfn函数..会把数据包发送到下一层...
 		ret = 1;
 	} else if (verdict == NF_DROP) {
+		//丢弃一个数据包..释放掉该数据包占据的资源..
 		kfree_skb(skb);
 		ret = -EPERM;
 	} else if ((verdict & NF_VERDICT_MASK) == NF_QUEUE) {
@@ -182,6 +194,10 @@ next_hook:
 			      verdict >> NF_VERDICT_BITS))
 			goto next_hook;
 	}
+	//可以看到这里并没有处理NF_STOLEN的返回...它的意思是偷了该数据包...
+	//然而它和DROP还是有区别的..没有为它释放掉skb资源...
+	//那么它在哪里释放呢??也许是在它返回NF_STOLEN的hook函数吧..我猜测.
+	//所谓偷了..那其实就是交给了netfilter然后消失不见了....但是对于DROP还是告诉了网络栈释放资源的..
 	rcu_read_unlock();
 	return ret;
 }

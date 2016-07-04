@@ -124,12 +124,15 @@ static void free_pidmap(struct upid *upid)
 
 static int alloc_pidmap(struct pid_namespace *pid_ns)
 {
+	//取出最后分配的pid号。
 	int i, offset, max_scan, pid, last = pid_ns->last_pid;
 	struct pidmap *map;
-
+	//分配的时候是从低到高，如果达到了最大值，需要从头开始查找.
+	//但是需要考虑到预留的情况，因此从预留的大小开始[0-RESERVED_PIDS]为预留PID号。
 	pid = last + 1;
 	if (pid >= pid_max)
 		pid = RESERVED_PIDS;
+	//计算PID号所在的page和在page的offset，pidmap是占据多个page的。
 	offset = pid & BITS_PER_PAGE_MASK;
 	map = &pid_ns->pidmap[pid/BITS_PER_PAGE];
 	max_scan = (pid_max + BITS_PER_PAGE - 1)/BITS_PER_PAGE - !offset;
@@ -149,10 +152,14 @@ static int alloc_pidmap(struct pid_namespace *pid_ns)
 			if (unlikely(!map->page))
 				break;
 		}
+		//nr_free代表着这个page的bitmap有多少个空闲的bit
 		if (likely(atomic_read(&map->nr_free))) {
 			do {
+				//查看page的offset的bit是不是空闲的，如果空闲则置位，找到了pid号了.
 				if (!test_and_set_bit(offset, map->page)) {
+					//那么该page的空闲bit就递减.
 					atomic_dec(&map->nr_free);
+					//保存到pid的namespace，供下次分配的起点。
 					pid_ns->last_pid = pid;
 					return pid;
 				}
@@ -168,12 +175,16 @@ static int alloc_pidmap(struct pid_namespace *pid_ns)
 					(i != max_scan || pid < last ||
 					    !((last+1) & BITS_PER_PAGE_MASK)));
 		}
+		//到了这里，代表前面pidmap的page没有找到空闲的bit，现在需要换一个page，并且从头开始寻找.offset = 0
 		if (map < &pid_ns->pidmap[(pid_max-1)/BITS_PER_PAGE]) {
-			++map;
+			++map;	//下一个page
 			offset = 0;
-		} else {
+		} else {	
+			//或从第一个page开始,
 			map = &pid_ns->pidmap[0];
 			offset = RESERVED_PIDS;
+			//前面以前找到过[last+1 ~ pid_max]没有找到,那么需要在找一下[RESERVED_PIDS - last]
+			//如果last == offset，那就是没有找到空闲的bit了。
 			if (unlikely(last == offset))
 				break;
 		}
@@ -246,17 +257,20 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 	int i, nr;
 	struct pid_namespace *tmp;
 	struct upid *upid;
-
+	//每个进程都有一个struct pid数据结构.
+	//它在每个命令空间的PID号存放在struct upid的数据结构里
+	//并且level的值就代表了，它存在于几个不同的命名空间内.每个level都有不同的PID号
+	//也就是说，会有level个 struct upid 数据数据结构,,,struct upid numbers[level].
 	pid = kmem_cache_alloc(ns->pid_cachep, GFP_KERNEL);
 	if (!pid)
 		goto out;
-
+	//下面的代码是在每个命名空间内分配PID号。
 	tmp = ns;
 	for (i = ns->level; i >= 0; i--) {
 		nr = alloc_pidmap(tmp);
 		if (nr < 0)
 			goto out_free;
-
+		//保存PID号和指向特定的命名空间。
 		pid->numbers[i].nr = nr;
 		pid->numbers[i].ns = tmp;
 		tmp = tmp->parent;
@@ -269,6 +283,7 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 		INIT_HLIST_HEAD(&pid->tasks[type]);
 
 	spin_lock_irq(&pidmap_lock);
+	//这里对每一级(level).pid号和命名空间进行hash，然后放到pid_hash表内。
 	for (i = ns->level; i >= 0; i--) {
 		upid = &pid->numbers[i];
 		hlist_add_head_rcu(&upid->pid_chain,
@@ -292,7 +307,9 @@ struct pid *find_pid_ns(int nr, struct pid_namespace *ns)
 {
 	struct hlist_node *elem;
 	struct upid *pnr;
-
+	//pid_chain是hash数组的头,pid_hash[]得到数组项里面的一个
+	//然后通过elem元素进行扫描数组的链表(会有冲突),pnr为contain_of得到的数据类型.
+	//因此这里遍历每个upid，判断namespace和pid号(一个命名空间内pid号唯一)，如果都相等，就返回pid结构体
 	hlist_for_each_entry_rcu(pnr, elem,
 			&pid_hash[pid_hashfn(nr, ns)], pid_chain)
 		if (pnr->nr == nr && pnr->ns == ns)
@@ -316,7 +333,9 @@ void attach_pid(struct task_struct *task, enum pid_type type,
 		struct pid *pid)
 {
 	struct pid_link *link;
-
+	//task_struct的字段pids[type],,接着让它的->pid = pid, 这样就有了联系了..
+	//type: PIDTYPE_SID, PIDTYPE_PGID, PIDTYPE_PID
+	//分别为session(会话), process group(进程组), process id.(进程号)
 	link = &task->pids[type];
 	link->pid = pid;
 	hlist_add_head_rcu(&link->node, &pid->tasks[type]);
@@ -437,11 +456,12 @@ pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 {
 	struct upid *upid;
 	pid_t nr = 0;
-
+	//每个namespace都有不同的不同的pid号，这个函数的参数是一个进程的pid(对应多个namespace, level变量
+	//可以确定。另外参数是ns，作用就是找到在ns指定的namespace的pid号。
 	if (pid && ns->level <= pid->level) {
 		upid = &pid->numbers[ns->level];
-		if (upid->ns == ns)
-			nr = upid->nr;
+		if (upid->ns == ns)	//是不是同一个namespace
+			nr = upid->nr;	//返回在该namepsace时候的pid号。
 	}
 	return nr;
 }
