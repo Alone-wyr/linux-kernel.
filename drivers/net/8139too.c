@@ -1933,6 +1933,8 @@ static void rtl8139_isr_ack(struct rtl8139_private *tp)
 	}
 }
 
+//返回值就是此次轮询加入的数据包数目...
+//
 static int rtl8139_rx(struct net_device *dev, struct rtl8139_private *tp,
 		      int budget)
 {
@@ -1946,7 +1948,7 @@ static int rtl8139_rx(struct net_device *dev, struct rtl8139_private *tp,
 		 " free to %4.4x, Cmd %2.2x.\n", dev->name, (u16)cur_rx,
 		 RTL_R16 (RxBufAddr),
 		 RTL_R16 (RxBufPtr), RTL_R8 (ChipCmd));
-
+		//received < budget确保满足一次论徐可以处理的数据包数目的条件.
 	while (netif_running(dev) && received < budget
 	       && (RTL_R8 (ChipCmd) & RxBufEmpty) == 0) {
 		u32 ring_offset = cur_rx % RX_BUF_LEN;
@@ -2109,6 +2111,8 @@ static void rtl8139_weird_interrupt (struct net_device *dev,
 	}
 }
 
+//bugdet就是当初把NAPI结构体和网卡dev绑定时候设定的weight..
+//应该是一次轮询可以处理的数据包数目..
 static int rtl8139_poll(struct napi_struct *napi, int budget)
 {
 	struct rtl8139_private *tp = container_of(napi, struct rtl8139_private, napi);
@@ -2118,9 +2122,10 @@ static int rtl8139_poll(struct napi_struct *napi, int budget)
 
 	spin_lock(&tp->rx_lock);
 	work_done = 0;
+	//以轮询模式继续接受数据包....
 	if (likely(RTL_R16(IntrStatus) & RxAckBits))
 		work_done += rtl8139_rx(dev, tp, budget);
-
+		//work_done为此次轮询处理的数据包数目..
 	if (work_done < budget) {
 		unsigned long flags;
 		/*
@@ -2129,11 +2134,14 @@ static int rtl8139_poll(struct napi_struct *napi, int budget)
 		 */
 		spin_lock_irqsave(&tp->lock, flags);
 		RTL_W16_F(IntrMask, rtl8139_intr_mask);
+		//退出轮询模式...
 		__napi_complete(napi);
 		spin_unlock_irqrestore(&tp->lock, flags);
 	}
 	spin_unlock(&tp->rx_lock);
-
+	//如过此次轮询处理的数据数目达到了上限..可见并没有退出轮询模式..
+	//而是返回了处理的数目.我想调用该poll函数会处理的。在
+	//dev.c函数的net_rx_action函数里面。
 	return work_done;
 }
 
@@ -2152,6 +2160,7 @@ static irqreturn_t rtl8139_interrupt (int irq, void *dev_instance)
 	status = RTL_R16 (IntrStatus);
 
 	/* shared irq? */
+	//检查该中断是否属于该设备的?因为共享中断的存在..因此是必要的。
 	if (unlikely((status & rtl8139_intr_mask) == 0))
 		goto out;
 
@@ -2178,6 +2187,9 @@ static irqreturn_t rtl8139_interrupt (int irq, void *dev_instance)
 
 	/* Receive packets are processed by poll routine.
 	   If not running start it now. */
+	//可以看到中断函数并没有处理rx的数据..而是开始了NAPI的poll轮询模式...
+	//在该模式下，难道是哪里会触发执行接受数据包的动作吗?
+	//这是一个软中断...但是我对软中断并不太了解...不知道咯..
 	if (status & RxAckBits){
 		if (napi_schedule_prep(&tp->napi)) {
 			RTL_W16_F (IntrMask, rtl8139_norx_intr_mask);

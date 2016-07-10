@@ -1951,13 +1951,18 @@ int netif_rx(struct sk_buff *skb)
 
 	__get_cpu_var(netdev_rx_stat).total++;
 	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) {
+		//qlen代表了当前处理队列已经有了skb了..
+		//并且进入到这里代表可以把该skb放入到该CPU的队列中来.			
 		if (queue->input_pkt_queue.qlen) {
 enqueue:
 			__skb_queue_tail(&queue->input_pkt_queue, skb);
 			local_irq_restore(flags);
 			return NET_RX_SUCCESS;
 		}
-
+		//这里的原因是因为qlen=0,也就是该skb是第一个进入到处理队列的skb..
+		//下面函数是打开NAPI的轮询模式...
+		//此外会标记NET_RX_SOFTIRQ，等待软中断来处理就好了..
+		//一旦软中断处理完成了，就会清空该标记咯。
 		napi_schedule(&queue->backlog);
 		goto enqueue;
 	}
@@ -2635,6 +2640,8 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		struct sk_buff *skb;
 
 		local_irq_disable();
+		//网卡驱动会调用net_rx函数来把skb放入队列..
+		//这里提取出来.
 		skb = __skb_dequeue(&queue->input_pkt_queue);
 		if (!skb) {
 			__napi_complete(napi);
@@ -2642,7 +2649,7 @@ static int process_backlog(struct napi_struct *napi, int quota)
 			break;
 		}
 		local_irq_enable();
-
+		//处理每一个数据包...
 		netif_receive_skb(skb);
 	} while (++work < quota && jiffies == start_time);
 
@@ -2660,6 +2667,7 @@ void __napi_schedule(struct napi_struct *n)
 	unsigned long flags;
 
 	local_irq_save(flags);
+	//打开了NAPI的轮询模式，把NAPI结构体添加到CPU变量上...
 	list_add_tail(&n->poll_list, &__get_cpu_var(softnet_data).poll_list);
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 	local_irq_restore(flags);
@@ -2763,7 +2771,7 @@ static void net_rx_action(struct softirq_action *h)
 		n = list_entry(list->next, struct napi_struct, poll_list);
 
 		have = netpoll_poll_lock(n);
-
+		//应该每次poll可以处理最大数据包数目..(可以添加到队列的数目).
 		weight = n->weight;
 
 		/* This NAPI_STATE_SCHED test is for avoiding a race
@@ -2773,11 +2781,14 @@ static void net_rx_action(struct softirq_action *h)
 		 * accidently calling ->poll() when NAPI is not scheduled.
 		 */
 		work = 0;
+		//对于不支持NAPI驱动的网卡来说，调用的是process_backlog 函数.
+			//判断是不是很处于NAPI的轮询模式...
 		if (test_bit(NAPI_STATE_SCHED, &n->state))
+			//返回值就是此次轮询处理的数据包数目..
 			work = n->poll(n, weight);
-
+		//处理的包数目是不会超过设定的上限的...
 		WARN_ON_ONCE(work > weight);
-
+		//计算此次轮询还可以处理多少个数据包...
 		budget -= work;
 
 		local_irq_disable();
@@ -2787,10 +2798,20 @@ static void net_rx_action(struct softirq_action *h)
 		 * still "owns" the NAPI instance and therefore can
 		 * move the instance around on the list at-will.
 		 */
+		 //注释写到驱动不应该改变NAPI的状态(也就是退出NAPI轮询模式)..
+		 //如果轮询消耗掉了所有weight..也就是轮处理了达到上限的数据包...
+		 //而如果对于没有处理达到上限数据包数目的，应该是调用了退出了NAPI轮询模式了..
+		 //此时会把该NAPI从该net_data给remove掉..调用的函数为__napi_complete或napi_complete
+		 
+		 //work == weight条件成立的话，就是轮询处理的数据包数目达到上限weight了.
+		 //那代表此时的数据量是非常大的..因此不该退出轮询模式..而应该继续轮询继续处理..
+		 //因为数据量在这个时刻是特别大的..
 		if (unlikely(work == weight)) {
+			//以防万一..还是应该判断一下是不是disable了NAPI的轮询...
 			if (unlikely(napi_disable_pending(n)))
 				__napi_complete(n);
 			else
+				//手动从poll_list中给remove掉..不过并没有退出轮询模式哦。
 				list_move_tail(&n->poll_list, list);
 		}
 
@@ -5237,7 +5258,7 @@ static int __init net_dev_init(void)
 	/*
 	 *	Initialise the packet receive queues.
 	 */
-
+	//对于每个CPU都维持这一个struct softnet_data数据结构.
 	for_each_possible_cpu(i) {
 		struct softnet_data *queue;
 
@@ -5245,7 +5266,7 @@ static int __init net_dev_init(void)
 		skb_queue_head_init(&queue->input_pkt_queue);
 		queue->completion_queue = NULL;
 		INIT_LIST_HEAD(&queue->poll_list);
-
+	//在net_rx_action函数会调用poll
 		queue->backlog.poll = process_backlog;
 		queue->backlog.weight = weight_p;
 		queue->backlog.gro_list = NULL;

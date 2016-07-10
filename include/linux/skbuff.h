@@ -309,7 +309,11 @@ typedef unsigned char *sk_buff_data_t;
  *	@secmark: security marking
  *	@vlan_tci: vlan tag control information
  */
-
+/*
+主要利用了NET_SKBUFF_DATA_USES_OFFSET这个宏定义来决定在64位系统里面tail、end指针
+会利用int变量来记录偏移，而32位系统里还是char*类型，考虑一下这样做的好处是应该保
+持了skb_buff变量在64位或者32位系统里都是一样的大小，可以节约空间。
+*/
 struct sk_buff {
 	/* These two members must be first. */
 	struct sk_buff		*next;
@@ -394,10 +398,11 @@ struct sk_buff {
 	__u32			mark;
 
 	__u16			vlan_tci;
-
+	//运输层、网络层、链路层的头.
 	sk_buff_data_t		transport_header;
 	sk_buff_data_t		network_header;
 	sk_buff_data_t		mac_header;
+	
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	sk_buff_data_t		tail;
 	sk_buff_data_t		end;
