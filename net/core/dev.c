@@ -370,6 +370,8 @@ void dev_add_pack(struct packet_type *pt)
 	int hash;
 
 	spin_lock_bh(&ptype_lock);
+	//抓包软件就定义这样的类型....ETH_P_ALL
+	//添加到ptype_all的这个链表上....
 	if (pt->type == htons(ETH_P_ALL))
 		list_add_rcu(&pt->list, &ptype_all);
 	else {
@@ -2242,6 +2244,8 @@ int netif_receive_skb(struct sk_buff *skb)
 
 	null_or_orig = NULL;
 	orig_dev = skb->dev;
+	//先假设orig_dev->master为空的话(暂时不知道什么意思.)...那就是null_or_orig = NULL.
+	//orig_dev指示了数据包的net device.
 	if (orig_dev->master) {
 		if (skb_bond_should_drop(skb))
 			null_or_orig = orig_dev; /* deliver only exact match */
@@ -2266,9 +2270,21 @@ int netif_receive_skb(struct sk_buff *skb)
 	}
 #endif
 
+//循环链表..因此一个数据包可以被放入到多个协议的回调函数里面进行处理咯..
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
+	//可以看到当注册一个协议的时候..如果设置的dev字段为NULL..那它会捕获所有的数据包...
+	//如果不是NULL..那就捕获它制定的net device的数据包..
+	//最终就是调用协议的func字段指定的回调函数..
+	//同时也可以看到，它和ptype_base的区别也在它只匹配接口..并不匹配协议..
 		if (ptype->dev == null_or_orig || ptype->dev == skb->dev ||
 		    ptype->dev == orig_dev) {
+		  //这里有些奇怪..对于匹配成功的协议.最后一次匹配成功的都不会执行它的回调函数.
+		  //而有pt_prev指向该协议.
+		  //假设先匹配了A，然后匹配了B.
+		  //匹配了A.pt_prev为NULL.并没有执行if里面的函数.但是pt_prev指向了A协议.
+		  //接着匹配了B,pt_prev为A的协议，然后执行了A的回调函数，此时pt_prev指向了B的协议.
+		  //但是最终没有在匹配任何协议了...此时B的协议的回调函数并没有执行...但是
+		  //pt_prev指向的是B的协议..下面会有机会调用的.
 			if (pt_prev)
 				ret = deliver_skb(skb, pt_prev, orig_dev);
 			pt_prev = ptype;
@@ -2294,15 +2310,22 @@ ncls:
 	type = skb->protocol;
 	list_for_each_entry_rcu(ptype,
 			&ptype_base[ntohs(type) & PTYPE_HASH_MASK], list) {
+			//先匹配协议...一旦协议匹配上了..然后再看该协议的dev如果为NULL.
+			//那就处理所有接口的该协议的数据..如果不为NULL..那就是处理有dev指定接口
+			//的type协议的数据咯..
 		if (ptype->type == type &&
 		    (ptype->dev == null_or_orig || ptype->dev == skb->dev ||
 		     ptype->dev == orig_dev)) {
+		     //参考前面的ptype_all的解释..
+		     //那这里就是调用了B协议的回调函数..同时一样的道理，最后匹配的协议的回调函数没有处理.
 			if (pt_prev)
 				ret = deliver_skb(skb, pt_prev, orig_dev);
 			pt_prev = ptype;
 		}
 	}
-
+	//这里处理了上面ptype_base的最后一次匹配的协议的回调函数的调用..
+	//或者说如果ptype_base没有任何匹配成功的,那就是调用前面ptype_all最后一次匹配成功的回调..
+	//那如果pt_prev为NULL...那就是ptype_all和ptype_base都没有匹配成功的协议...
 	if (pt_prev) {
 		ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
 	} else {
