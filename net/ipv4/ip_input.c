@@ -382,6 +382,10 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	/* When the interface is in promisc. mode, drop all the crap
 	 * that it receives, do not try to analyse it.
 	 */
+	 //接口处于混杂模式的时候..网卡不仅仅可以接收它MAC地址的数据包..而是会接收经过它的所有数据包.
+	 //在调用该函数之前会设置pkt_type..从名称看就是其他HOST的数据包..根据skb中det mac来判断咯.
+	 //那就不需要在ip层处理了..而是直接drop掉..该层只处理本机的数据包..
+	 //drop掉后，自然会有其他的协议会处理..
 	if (skb->pkt_type == PACKET_OTHERHOST)
 		goto drop;
 

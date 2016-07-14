@@ -201,6 +201,9 @@ static inline void fn_free_alias(struct fib_alias *fa, struct fib_node *f)
 		kmem_cache_free(fn_alias_kmem, fa);
 }
 
+/*
+参数z代表掩码长度..z=0的时候代表为默认路由项..一般来说只有一个默认路由项
+*/
 static struct fn_zone *
 fn_new_zone(struct fn_hash *table, int z)
 {
@@ -214,20 +217,28 @@ fn_new_zone(struct fn_hash *table, int z)
 	} else {
 		fz->fz_divisor = 1;
 	}
+	//计算hash值的作用...当算出hash值，再hash & fz_hashmask就得出了在哈希表的位置
 	fz->fz_hashmask = (fz->fz_divisor - 1);
+	
 	fz->fz_hash = fz_hash_alloc(fz->fz_divisor);
 	if (!fz->fz_hash) {
 		kfree(fz);
 		return NULL;
 	}
+	//存放掩码的长度....
 	fz->fz_order = z;
+	//存放子网掩码的值.
 	fz->fz_mask = inet_make_mask(z);
 
 	/* Find the first not empty zone with more specific mask */
+	//找到第一个掩码长度大于当前new的fn_zones
 	for (i=z+1; i<=32; i++)
 		if (table->fn_zones[i])
 			break;
+		
 	write_lock_bh(&fib_hash_lock);
+	//下面是把已经存在的fb_zones链接成一个链表..
+	//table->fn_zone_list作为链表头..链表组成是有掩码长度的大到小的递减顺序...
 	if (i>32) {
 		/* No more specific masks, we are the first. */
 		fz->fz_next = table->fn_zone_list;
@@ -236,6 +247,7 @@ fn_new_zone(struct fn_hash *table, int z)
 		fz->fz_next = table->fn_zones[i]->fz_next;
 		table->fn_zones[i]->fz_next = fz;
 	}
+	//把新new的添加到fn_zones
 	table->fn_zones[z] = fz;
 	fib_hash_genid++;
 	write_unlock_bh(&fib_hash_lock);
@@ -347,6 +359,8 @@ out:
 /* Insert node F to FZ. */
 static inline void fib_insert_node(struct fn_zone *fz, struct fib_node *f)
 {
+								//fz是已经确定了一个掩码长度的zone...这里是让fz+fn_key计算掩码得到hash数组的项.
+								//在同一个fn_zone，相同掩码长度..那应该认为具有相同的(网络和子网号的划分界限)
 	struct hlist_head *head = &fz->fz_hash[fn_hash(f->fn_key, fz)];
 
 	hlist_add_head(&f->fn_hash, head);
@@ -780,7 +794,9 @@ void __init fib_hash_init(void)
 struct fib_table *fib_hash_table(u32 id)
 {
 	struct fib_table *tb;
-
+	//分配fib_table和fn_hash
+	//fn_hash的内存是接在fib_table后面的..也看到fib_table的最后一项为unsigned char	tb_data[0];一个可变长的结构体.
+	//
 	tb = kmalloc(sizeof(struct fib_table) + sizeof(struct fn_hash),
 		     GFP_KERNEL);
 	if (tb == NULL)
@@ -794,6 +810,7 @@ struct fib_table *fib_hash_table(u32 id)
 	tb->tb_flush = fn_hash_flush;
 	tb->tb_select_default = fn_hash_select_default;
 	tb->tb_dump = fn_hash_dump;
+	//清零咯...
 	memset(tb->tb_data, 0, sizeof(struct fn_hash));
 	return tb;
 }
