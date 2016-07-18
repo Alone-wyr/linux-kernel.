@@ -198,7 +198,8 @@ asmlinkage void __do_softirq(void)
 
 	pending = local_softirq_pending();
 	account_system_vtime(current);
-
+	//关闭软中断...那其实就是标记一个变量而已..在do_softirq函数中..会首先判断，如果标记了.
+	//直接返回就不继续往下执行..
 	__local_bh_disable((unsigned long)__builtin_return_address(0));
 	lockdep_softirq_enter();
 

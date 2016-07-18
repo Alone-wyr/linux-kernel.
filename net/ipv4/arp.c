@@ -669,6 +669,15 @@ void arp_xmit(struct sk_buff *skb)
 /*
  *	Create and send an arp packet.
  */
+ /*
+ type: 协议编码..request或reply
+ ptype: 硬件接口类型.
+ dev:发送数据包的接口.
+
+ targwt_hw..用于arp repley来填充arp 缓存表的..作为request..应该设置为0.
+
+ 其他一个就是IP地址源和目的..MAC地址源和目的
+ */
 void arp_send(int type, int ptype, __be32 dest_ip,
 	      struct net_device *dev, __be32 src_ip,
 	      const unsigned char *dest_hw, const unsigned char *src_hw,
@@ -718,14 +727,15 @@ static int arp_process(struct sk_buff *skb)
 		goto out;
 
 	arp = arp_hdr(skb);
-
+	//根据设备类型来检测协议类型...
 	switch (dev_type) {
 	default:
 		if (arp->ar_pro != htons(ETH_P_IP) ||
 		    htons(dev_type) != arp->ar_hrd)
 			goto out;
 		break;
-	case ARPHRD_ETHER:
+		//以太网的设备类型???
+	case ARPHRD_ETHER:	
 	case ARPHRD_IEEE802_TR:
 	case ARPHRD_FDDI:
 	case ARPHRD_IEEE802:
@@ -738,8 +748,10 @@ static int arp_process(struct sk_buff *skb)
 		 * however, to be more robust, we'll accept both 1 (Ethernet)
 		 * or 6 (IEEE 802.2)
 		 */
+		 //ar_hrd保存着硬件类型.
 		if ((arp->ar_hrd != htons(ARPHRD_ETHER) &&
 		     arp->ar_hrd != htons(ARPHRD_IEEE802)) ||
+		     //检测发送的高层协议是不是ip层...
 		    arp->ar_pro != htons(ETH_P_IP))
 			goto out;
 		break;
@@ -756,7 +768,7 @@ static int arp_process(struct sk_buff *skb)
 	}
 
 	/* Understand only these message types */
-
+	//arp协议只处理arp请求和arp回复...
 	if (arp->ar_op != htons(ARPOP_REPLY) &&
 	    arp->ar_op != htons(ARPOP_REQUEST))
 		goto out;
@@ -764,17 +776,27 @@ static int arp_process(struct sk_buff *skb)
 /*
  *	Extract fields
  */
+ /*
+ * 提取ARP包体的各个字段
+ * ARP包头：硬件类型(2bytes)+上层协议类型(2bytes)+硬件地址长度(1bytes)+协议地址长度(1bytes)+操作类型(2bytes,请求or响应)
+ * ARP包体：源mac地址(6bytes)+源IP地址(4bytes)+目的mac地址(6bytes)+目的IP地址(4bytes)
+ */
+ 	//arp_ptr指向arp的数据..(去掉前面的arp数据包头)
 	arp_ptr= (unsigned char *)(arp+1);
+	//source hardware address.
 	sha	= arp_ptr;
 	arp_ptr += dev->addr_len;
+	//source ip
 	memcpy(&sip, arp_ptr, 4);
 	arp_ptr += 4;
 	arp_ptr += dev->addr_len;
+	//destination ip.
 	memcpy(&tip, arp_ptr, 4);
 /*
  *	Check for bad requests for 127.x.x.x and requests for multicast
  *	addresses.  If this is one such, delete it.
  */
+ //判断是不会回环设备或者是多播...因为它们没有自己的MAC地址..直接退出.
 	if (ipv4_is_loopback(tip) || ipv4_is_multicast(tip))
 		goto out;
 
@@ -805,21 +827,29 @@ static int arp_process(struct sk_buff *skb)
 	 *  Special case: IPv4 duplicate address detection packet (RFC2131)
 	 *  and Gratuitous ARP/ARP Announce. (RFC3927, Section 2.4)
 	 */
+	 //发送到本机的,,request来自于本机的...
 	if (sip == 0 || tip == sip) {
+		//判断是不是一个arp的request...
 		if (arp->ar_op == htons(ARPOP_REQUEST) &&
 		    inet_addr_type(net, tip) == RTN_LOCAL &&
 		    !arp_ignore(in_dev, sip, tip))
+		    //返回一个arp 的 reply...
 			arp_send(ARPOP_REPLY, ETH_P_ARP, sip, dev, tip, sha,
 				 dev->dev_addr, sha);
 		goto out;
 	}
-
+	//如果是一个请求..前面已经去掉了发送给自己的情况..
+	//那就是要发送到其他主机..此时它会去查看一下路由表...
+	//路由表中找到目标IP得路由信息,会保存在skb->dst中
 	if (arp->ar_op == htons(ARPOP_REQUEST) &&
 	    ip_route_input(skb, tip, sip, 0, dev) == 0) {
 
 		rt = skb->rtable;
 		addr_type = rt->rt_type;
+		/*rt_type为路由类型。路由类型有：RTN_UNICAST（单播），*/
+		 /*RTN_LOCAL（本地终结），RTN_BROADCAST（广播接收、广播发送）等*/
 
+		//request来自于其他主机的..然后查找路由后，发现是发给自己的..此时就接受..然后返回个arp reply.
 		if (addr_type == RTN_LOCAL) {
 			int dont_send = 0;
 
@@ -836,6 +866,7 @@ static int arp_process(struct sk_buff *skb)
 			}
 			goto out;
 		} else if (IN_DEV_FORWARD(in_dev)) {
+		//判断接口转发是否打开的...?
 			    if (addr_type == RTN_UNICAST  && rt->u.dst.dev != dev &&
 			     (arp_fwd_proxy(in_dev, rt) || pneigh_lookup(&arp_tbl, net, &tip, dev, 0))) {
 				n = neigh_event_ns(&arp_tbl, sha, &sip, dev);
@@ -852,7 +883,7 @@ static int arp_process(struct sk_buff *skb)
 					return 0;
 				}
 				goto out;
-			}
+			    	}
 		}
 	}
 
@@ -919,11 +950,11 @@ static int arp_rcv(struct sk_buff *skb, struct net_device *dev,
 		goto freeskb;
 
 	arp = arp_hdr(skb);
-	if (arp->ar_hln != dev->addr_len ||
-	    dev->flags & IFF_NOARP ||
-	    skb->pkt_type == PACKET_OTHERHOST ||
-	    skb->pkt_type == PACKET_LOOPBACK ||
-	    arp->ar_pln != 4)
+	if (arp->ar_hln != dev->addr_len ||			//判断硬件地址长度是否一致.
+	    dev->flags & IFF_NOARP ||				//判断设备是否支持arp协议
+	    skb->pkt_type == PACKET_OTHERHOST ||	//数据包需要转发...不应该是ARP数据包的转发包.
+	    skb->pkt_type == PACKET_LOOPBACK ||		//回环接口不处理arp.
+	    arp->ar_pln != 4)						//协议地址长度是不是等于4..
 		goto freeskb;
 
 	if ((skb = skb_share_check(skb, GFP_ATOMIC)) == NULL)

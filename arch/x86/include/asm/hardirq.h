@@ -3,7 +3,20 @@
 
 #include <linux/threads.h>
 #include <linux/irq.h>
+/*
+linux 软中断有个原则就是"谁触发，谁执行" "who marks, who runs" ..因为对于每个CPU
+来说，都需要一个数据结构来描述触发和控制....那就是下面这个结构体咯..
+被定义在softirq.c文件，数组项的数目当前就是系统CPU的数目:
+#ifndef __ARCH_IRQ_STAT
+irq_cpustat_t irq_stat[NR_CPUS] ____cacheline_aligned;
+EXPORT_SYMBOL(irq_stat);
+#endif
 
+当前linux支持32个软终端...
+下面的字段和触发与控制是相关的.
+__softirq_pending,,记录当前这个CPU的某个软中断是否被挂起..每个bit代表一个中断咯..
+
+*/
 typedef struct {
 	unsigned int __softirq_pending;
 	unsigned int __nmi_count;	/* arch dependent */

@@ -131,7 +131,12 @@ struct arpreq_old {
 /*
  *	This structure defines an ethernet arp header.
  */
-
+/*
+arp数据包头: 
+	硬件类型: 2, 协议类型: 2, 硬件地址长度: 1, 协议地址长度:1, op:2, (也是下面结构体定义的，其他还有一些字段，下面没有定义)
+arp数据:
+	发送端以太网地址:6, 发送端IP地址:4, 目的以太网地址:6, 目的IP地址:4.
+*/
 struct arphdr
 {
 	__be16		ar_hrd;		/* format of hardware address	*/
