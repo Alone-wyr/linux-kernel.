@@ -362,7 +362,12 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 {
 	irqreturn_t ret, retval = IRQ_NONE;
 	unsigned int status = 0;
-
+/*
+发生中断的时候,,那其实CPU硬件会做一定的处理，比如说会把标记寄存器放入堆栈里面,
+然后会清除IF标记，接着进入到中断处理过程。
+清除IF标记意味着说，关闭了CPU的中断，此时就需要判断说，处理过程是否真的需要关闭，
+不让其他中断嵌套进来..
+*/
 	if (!(action->flags & IRQF_DISABLED))
 		local_irq_enable_in_hardirq();
 
@@ -417,6 +422,11 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 
 	if (status & IRQF_SAMPLE_RANDOM)
 		add_interrupt_randomness(irq);
+/*
+进来该函数的时候CPU是关闭中断的，只是后面通过是否设置IRQF_DISABLED来判断
+到底要不要开启而已..但是不管是否开启.最退出该函数的时候都会设置为
+关闭咯。
+*/
 	local_irq_disable();
 
 	return retval;

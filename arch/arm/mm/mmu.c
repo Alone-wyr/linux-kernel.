@@ -607,7 +607,7 @@ void __init create_mapping(struct map_desc *md)
 	unsigned long phys, addr, length, end;
 	const struct mem_type *type;
 	pgd_t *pgd;
-	//在用户空间，且不是异常向量表。那么不可以床架你映射。
+	//在用户空间，且不是异常向量表。那么不可以创建映射。
 	if (md->virtual != vectors_base() && md->virtual < TASK_SIZE) {
 		printk(KERN_WARNING "BUG: not creating mapping for "
 		       "0x%08llx at 0x%08lx in user region\n",
