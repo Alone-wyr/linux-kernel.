@@ -162,12 +162,12 @@ asmlinkage void do_softirq(void)
 	struct thread_info *curctx;
 	union irq_ctx *irqctx;
 	u32 *isp;
-
+/* 如果当前已处于硬中断或软中断中，直接返回 */
 	if (in_interrupt())
 		return;
 
 	local_irq_save(flags);
-
+	//返回软中断的__softirq_pending字段..如果不为0..那就是当前有软中断需要处理..
 	if (local_softirq_pending()) {
 		curctx = current_thread_info();
 		irqctx = __get_cpu_var(softirq_ctx);

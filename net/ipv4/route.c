@@ -1089,12 +1089,15 @@ restart:
 
 	spin_lock_bh(rt_hash_lock_addr(hash));
 	while ((rth = *rthp) != NULL) {
+		//expired过期的...那可以认为是把路由缓存表过期的表项给remove掉吗?
 		if (rt_is_expired(rth)) {
 			*rthp = rth->u.dst.rt_next;
 			rt_free(rth);
 			continue;
 		}
 		if (compare_keys(&rth->fl, &rt->fl) && compare_netns(rth, rt)) {
+			//表项的key相同..而且是同一个网络空间 net namespace..
+			//那就是要添加的路由表项已经存在路由缓存表了...
 			/* Put it first */
 			*rthp = rth->u.dst.rt_next;
 			/*
@@ -1109,7 +1112,7 @@ restart:
 			 * must be ordered for consistency on SMP.
 			 */
 			rcu_assign_pointer(rt_hash_table[hash].chain, rth);
-
+			//更新一下它的活动时间...
 			dst_use(&rth->u.dst, now);
 			spin_unlock_bh(rt_hash_lock_addr(hash));
 
@@ -1191,6 +1194,7 @@ restart:
 		}
 	}
 
+	//在这里就是添加路由表项到路由缓存表, 1
 	rt->u.dst.rt_next = rt_hash_table[hash].chain;
 
 #if RT_CACHE_DEBUG >= 2
@@ -1207,6 +1211,8 @@ restart:
 	 * previous writes to rt are comitted to memory
 	 * before making rt visible to other CPUS.
 	 */
+	 //在这里就是添加路由表项到路由缓存表, 2
+	 //由这2步完成往链表里面添加结点.
 	rcu_assign_pointer(rt_hash_table[hash].chain, rt);
 
 	spin_unlock_bh(rt_hash_lock_addr(hash));
@@ -1281,6 +1287,8 @@ static void rt_del(unsigned hash, struct rtable *rt)
 	spin_lock_bh(rt_hash_lock_addr(hash));
 	ip_rt_put(rt);
 	while ((aux = *rthp) != NULL) {
+		//查找路由缓存表..找到要删除的表项..
+		//同时它也会对每个表项进行判断是否已经过期不可用了...如果是..也进行删除掉咯.
 		if (aux == rt || rt_is_expired(aux)) {
 			*rthp = aux->u.dst.rt_next;
 			rt_free(aux);
@@ -2214,6 +2222,9 @@ martian_source:
 	goto e_inval;
 }
 
+/*
+路由缓存在内核中组织成hash表.
+*/
 int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		   u8 tos, struct net_device *dev)
 {
@@ -2228,11 +2239,13 @@ int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		goto skip_cache;
 
 	tos &= IPTOS_RT_MASK;
+	//计算hash值..可以确定可能得到路由所在的链表.....
 	hash = rt_hash(daddr, saddr, iif, rt_genid(net));
 
 	rcu_read_lock();
 	for (rth = rcu_dereference(rt_hash_table[hash].chain); rth;
 	     rth = rcu_dereference(rth->u.dst.rt_next)) {
+	//然后需要完整性的匹配...daddr saddr iif tos mark 
 		if (((rth->fl.fl4_dst ^ daddr) |
 		     (rth->fl.fl4_src ^ saddr) |
 		     (rth->fl.iif ^ iif) |
@@ -2241,9 +2254,12 @@ int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		    rth->fl.mark == skb->mark &&
 		    net_eq(dev_net(rth->u.dst.dev), net) &&
 		    !rt_is_expired(rth)) {
+		   //更新表项的活动时间...因为是它是作为缓存表咯..当需要替换的时候..替换那些长时间不活动的表项.
 			dst_use(&rth->u.dst, jiffies);
+		   //增加命中路由表缓存的计数值..
 			RT_CACHE_STAT_INC(in_hit);
 			rcu_read_unlock();
+		//如果找到了匹配的路由项..让skb的rtable指向该路由项..
 			skb->rtable = rth;
 			return 0;
 		}
@@ -2263,6 +2279,7 @@ skip_cache:
 	   Note, that multicast routers are not affected, because
 	   route cache entry is created eventually.
 	 */
+	 //判断是不是组播地址..
 	if (ipv4_is_multicast(daddr)) {
 		struct in_device *in_dev;
 
@@ -2284,6 +2301,7 @@ skip_cache:
 		rcu_read_unlock();
 		return -EINVAL;
 	}
+	//路由缓存表找不到匹配的项...现在查找路由表..
 	return ip_route_input_slow(skb, daddr, saddr, tos, dev);
 }
 

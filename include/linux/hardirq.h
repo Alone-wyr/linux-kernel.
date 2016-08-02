@@ -148,6 +148,7 @@ extern void rcu_nmi_exit(void);
  * always balanced, so the interrupted value of ->hardirq_context
  * will always be restored.
  */
+ //主要就是对preempt_count在hard irq区域加1...
 #define __irq_enter()					\
 	do {						\
 		account_system_vtime(current);		\

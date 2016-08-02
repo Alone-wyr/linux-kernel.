@@ -50,7 +50,7 @@
 static int __net_init fib4_rules_init(struct net *net)
 {
 	struct fib_table *local_table, *main_table;
-
+	//分别为LOCAL和MAIN分配fib_table..
 	local_table = fib_hash_table(RT_TABLE_LOCAL);
 	if (local_table == NULL)
 		return -ENOMEM;
@@ -58,7 +58,8 @@ static int __net_init fib4_rules_init(struct net *net)
 	main_table  = fib_hash_table(RT_TABLE_MAIN);
 	if (main_table == NULL)
 		goto fail;
-
+	//fib_table_hash为调用该函数时候分配的一个hash数组..也是只有2个数组项...
+	//因此就是把fib_table分别添加到对应的hlist上..
 	hlist_add_head_rcu(&local_table->tb_hlist,
 				&net->ipv4.fib_table_hash[TABLE_LOCAL_INDEX]);
 	hlist_add_head_rcu(&main_table->tb_hlist,
@@ -975,7 +976,10 @@ static int __net_init ip_fib_net_init(struct net *net)
 {
 	int err;
 	unsigned int i;
-
+		//一般来说这个hash数组只有2个项...
+		//分别用于
+		//#define TABLE_LOCAL_INDEX	0
+		//#define TABLE_MAIN_INDEX	1
 	net->ipv4.fib_table_hash = kzalloc(
 			sizeof(struct hlist_head)*FIB_TABLE_HASHSZ, GFP_KERNEL);
 	if (net->ipv4.fib_table_hash == NULL)

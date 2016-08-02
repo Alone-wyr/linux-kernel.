@@ -269,8 +269,41 @@ static inline int dst_output(struct sk_buff *skb)
 }
 
 /* Input packet from network to transport.  */
+
+#if 0
+struct rtable
+{
+	union
+	{
+		struct dst_entry	dst;
+	} u;
+
+	/* Cache lookup keys */
+	struct flowi		fl;
+
+	struct in_device	*idev;
+	
+	int			rt_genid;
+	unsigned		rt_flags;
+	__u16			rt_type;
+
+	__be32			rt_dst;	/* Path destination	*/
+	__be32			rt_src;	/* Path source		*/
+	int			rt_iif;
+
+	/* Info on neighbour */
+	__be32			rt_gateway;
+
+	/* Miscellaneous cached information */
+	__be32			rt_spec_dst; /* RFC1122 specific destination */
+	struct inet_peer	*peer; /* long-living peer info */
+};
+#endif
+
 static inline int dst_input(struct sk_buff *skb)
 {
+//在匹配路由项的时候会设置...注意它和rtable的关联.
+//在skb中是定义为union的..rtable和dst  并且rtable结构体的定义的一开头就是定义一个dst..
 	return skb->dst->input(skb);
 }
 

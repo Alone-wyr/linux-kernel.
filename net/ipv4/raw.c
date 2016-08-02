@@ -193,7 +193,9 @@ int raw_local_deliver(struct sk_buff *skb, int protocol)
 {
 	int hash;
 	struct sock *raw_sk;
-
+	//根据protocol来得到raw_v4_hashinfo上的一个hash数组项..
+	//可以认为是一个链表的head咯...
+	//这个链表的结点是包含在struct sock结构体的...
 	hash = protocol & (RAW_HTABLE_SIZE - 1);
 	raw_sk = sk_head(&raw_v4_hashinfo.ht[hash]);
 

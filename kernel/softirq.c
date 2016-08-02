@@ -198,7 +198,8 @@ asmlinkage void __do_softirq(void)
 
 	pending = local_softirq_pending();
 	account_system_vtime(current);
-
+	//关闭软中断...那其实就是标记一个变量而已..在do_softirq函数中..会首先判断，如果标记了.
+	//直接返回就不继续往下执行..
 	__local_bh_disable((unsigned long)__builtin_return_address(0));
 	lockdep_softirq_enter();
 
@@ -273,6 +274,9 @@ asmlinkage void do_softirq(void)
 /*
  * Enter an interrupt context.
  */
+ //进入到中断的上下文..这里可以认为是中断的入口...
+ //需要知道的是..当中断发生，跳转到中断向量..然后进入到处理函数..这些都是由硬件自动完成的.
+ //同时硬件还会屏蔽外部中断...此时irq_enter下.外部中断就是屏蔽的.
 void irq_enter(void)
 {
 	int cpu = smp_processor_id();
@@ -298,7 +302,13 @@ void irq_exit(void)
 {
 	account_system_vtime(current);
 	trace_hardirq_exit();
+	//离开中断上下文..递减prempt_count在hard irq区域的计数.
 	sub_preempt_count(IRQ_EXIT_OFFSET);
+	/*
+	由于中断进来可能是嵌套的...所有判断in_interrupt是有一定道理的..当属于嵌套的时候..即使需要处理软中断..也会等最开始
+	的中断返回来进入到软中断的处理..
+	也可能是在执行软中断的时候被中断进来..此时也是等待中断返回，返回到本来被中断的软中断处理过程.
+	*/
 	if (!in_interrupt() && local_softirq_pending())
 		invoke_softirq();
 

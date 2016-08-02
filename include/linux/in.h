@@ -256,7 +256,10 @@ static inline bool ipv4_is_loopback(__be32 addr)
 {
 	return (addr & htonl(0xff000000)) == htonl(0x7f000000);
 }
-
+//多播的IP返回224.0.0.0～239.255.255.255
+//224的16进制: 0xE0
+//239的16进制: 0xEF 
+//判断是不是属于0xE0 0xFF 0xFF 0xFF ~ 0xEF 0xFF 0xFF 0xFF 的范围就可以知道是不是多播地址...
 static inline bool ipv4_is_multicast(__be32 addr)
 {
 	return (addr & htonl(0xf0000000)) == htonl(0xe0000000);

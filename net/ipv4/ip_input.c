@@ -189,22 +189,33 @@ int ip_call_ra_chain(struct sk_buff *skb)
 	return 0;
 }
 
+/*
+来到了这里代表说...一个完整的数据包发送过来的..下面会隐蔽了ip层分包的可能性...
+*/
 static int ip_local_deliver_finish(struct sk_buff *skb)
 {
 	struct net *net = dev_net(skb->dev);
-
+	//去掉ip的数据包头.skb->data
 	__skb_pull(skb, ip_hdrlen(skb));
 
 	/* Point into the IP datagram, just past the header. */
+	//指向ip层的数据体..也就是相当于去掉了ip层的头啦..
+	//设置transport_header指向了传送层的数据了(传输层头+传输层体)
 	skb_reset_transport_header(skb);
 
 	rcu_read_lock();
 	{
+		//这里可以得到该数据包使用ip上层的协议(tcp/udp等).
+		//发送方是从顶往底不断的封装包的.
 		int protocol = ip_hdr(skb)->protocol;
 		int hash, raw;
 		struct net_protocol *ipprot;
 
 	resubmit:
+		//查看是否有原始套接字会接受该数据包...
+		//原始套接字是工作与网络层或者是链路层的.(那是不是意味着应该有2个地方要匹配原始套接字??)
+		//函数packet_create这里是创建在链路层传输数据给原始套接字的..那这里就是网络层传输给套接字咯?
+		//它没有TCP或UDP协议这样的说法...上层的应用就是工作与传输层咯.
 		raw = raw_local_deliver(skb, protocol);
 
 		hash = protocol & (MAX_INET_PROTOS - 1);
@@ -227,6 +238,10 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 				}
 				nf_reset(skb);
 			}
+			//向上层交付数据...具体有哪些协议可以查看inet_protos这个数组...
+			//函数inet_add_protocol往数组内添加协议.
+			//比如说inet_init函数中，有inet_add_protocol(&tcp_protocol, IPPROTO_TCP) 和inet_add_protocol(&tcp_protocol, IPPROTO_UDP)..
+			//就是添加了TCP和UDP协议.
 			ret = ipprot->handler(skb);
 			if (ret < 0) {
 				protocol = -ret;
@@ -259,6 +274,11 @@ int ip_local_deliver(struct sk_buff *skb)
 	/*
 	 *	Reassemble IP fragments.
 	 */
+		/*
+		 * 判断该IP数据包是否是一个分片，如果IP_MF置位，则表示该包是分片之一，其
+		 * 后还有更多分片，最后一个IP分片未置位IP_MF但是其offset是非0。
+		 * 如果是一个IP分片，则调用ip_defrag重新组织IP数据包。
+		 */
 
 	if (ip_hdr(skb)->frag_off & htons(IP_MF | IP_OFFSET)) {
 		if (ip_defrag(skb, IP_DEFRAG_LOCAL_DELIVER))
@@ -382,6 +402,10 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	/* When the interface is in promisc. mode, drop all the crap
 	 * that it receives, do not try to analyse it.
 	 */
+	 //接口处于混杂模式的时候..网卡不仅仅可以接收它MAC地址的数据包..而是会接收经过它的所有数据包.
+	 //在调用该函数之前会设置pkt_type..从名称看就是其他HOST的数据包..根据skb中det mac来判断咯.
+	 //那就不需要在ip层处理了..而是直接drop掉..该层只处理本机的数据包..
+	 //drop掉后，自然会有其他的协议会处理..
 	if (skb->pkt_type == PACKET_OTHERHOST)
 		goto drop;
 
