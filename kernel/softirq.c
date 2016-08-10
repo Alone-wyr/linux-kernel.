@@ -200,18 +200,26 @@ asmlinkage void __do_softirq(void)
 	account_system_vtime(current);
 	//关闭软中断...那其实就是标记一个变量而已..在do_softirq函数中..会首先判断，如果标记了.
 	//直接返回就不继续往下执行..
+	//进入到软中断上下文.
 	__local_bh_disable((unsigned long)__builtin_return_address(0));
 	lockdep_softirq_enter();
 
 	cpu = smp_processor_id();
 restart:
 	/* Reset the pending bitmask before enabling irqs */
+	//是的，进入到该函数的时候都是禁止中断的状态下.这是一个per-cpu变量..
+	//标记pending是否有软中断..
 	set_softirq_pending(0);
-
+	//重新开启中断.因此后面处理软中断的过程,是有可能被中断处理函数给中断掉的!!
 	local_irq_enable();
 
 	h = softirq_vec;
-
+	/*
+	下面就是遍历软中断标记..看哪几个软中断处理函数需要被执行..
+	注意，下面是开启中断的情况下执行..因此可能被中断。
+	另外一个就是，假设被中断那有可能引起新的软中断处理函数(也就是中断函数里面	
+	有对pending有置位了,或许在软中断处理函数内部也自己触发了软中断呢??)
+	*/
 	do {
 		if (pending & 1) {
 			int prev_count = preempt_count();
@@ -233,19 +241,23 @@ restart:
 		h++;
 		pending >>= 1;
 	} while (pending);
-
+	//这里会关闭中断.
 	local_irq_disable();
-
+	//判断在软中断处理喊出执行的过程中是否有新的软中断被触发.
 	pending = local_softirq_pending();
+	//如果有..那就继续返回到restart继续处理...设置了max_restart的原因是..
+	//当软中断很密集的时候...那可能不断的跳到restart，那就是一直
+	//不断地重复这样..那也就不会从软中断处理函数退出到中断点继续执行.
 	if (pending && --max_restart)
 		goto restart;
-
+//可能发生pending不等于0，但是mac_restart为0..此时会通过启动软中断线程继续处理.
 	if (pending)
 		wakeup_softirqd();
 
 	lockdep_softirq_exit();
 
 	account_system_vtime(current);
+//退出软中断上下文.
 	_local_bh_enable();
 }
 
@@ -308,6 +320,7 @@ void irq_exit(void)
 	由于中断进来可能是嵌套的...所有判断in_interrupt是有一定道理的..当属于嵌套的时候..即使需要处理软中断..也会等最开始
 	的中断返回来进入到软中断的处理..
 	也可能是在执行软中断的时候被中断进来..此时也是等待中断返回，返回到本来被中断的软中断处理过程.
+	local_softirq_pending是判断当前CPU是否有软中断挂起
 	*/
 	if (!in_interrupt() && local_softirq_pending())
 		invoke_softirq();

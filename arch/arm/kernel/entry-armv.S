@@ -352,13 +352,22 @@ ENDPROC(__pabt_svc)
 	.macro	usr_entry
  UNWIND(.fnstart	)
  UNWIND(.cantunwind	)	@ don't unwind the user space
+/*
+	将svc32堆栈指针向低地址方向移动一个pt_regs结构大小，用于保存寄存器现场。
+	svc模式和usr模式是公用r0-r12寄存器的..
+*/	
 	sub	sp, sp, #S_FRAME_SIZE
 	stmib	sp, {r1 - r12}
-
+/*
+r0保存的是中断模式下的堆栈..因此这里就是把
+	r0_usr->r1, lr->r2, spsr->r3.
+*/
 	ldmia	r0, {r1 - r3}
 	add	r0, sp, #S_PC		@ here for interlock avoidance
 	mov	r4, #-1			@  ""  ""     ""        ""
-
+/*
+从中断堆栈(exception stack)拷贝真正的r0.
+*/
 	str	r1, [sp]		@ save the "real" r0 copied
 					@ from the exception stack
 
@@ -371,7 +380,14 @@ ENDPROC(__pabt_svc)
 	@
 	@ Also, separately save sp_usr and lr_usr
 	@
+/*
+r0在前面设置过了就是堆栈中pc的位置.
+此时的r2是lr_irq也就是返回地址, r3是spsr也就是标记寄存器.r4.我看到是等于-1..前面赋值的.
+*/
 	stmia	r0, {r2 - r4}
+/*
+将堆栈值和LR加入到堆栈...这里的SP和LR分别是什么?
+*/
 	stmdb	r0, {sp, lr}^
 
 	@
@@ -440,18 +456,37 @@ __irq_usr:
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	trace_hardirqs_off
 #endif
+/*
+获取当前进程的进程描述符中的成员变量thread_info的地址
+根据当前sp指针，将该指针最右边13位清0，获得当前任务的thread_info。
+*/
 	get_thread_info tsk
+//如果定义了内核抢占.
 #ifdef CONFIG_PREEMPT
+//把preempt_count的值保存到r8寄存器上面.
 	ldr	r8, [tsk, #TI_PREEMPT]		@ get preempt count
+//需要递增...代表说不允许进行内核抢占.因为正在中断上下文中.
 	add	r7, r8, #1			@ increment it
+//显然在，退出中断的时候..会对它递减.代表离开中断.
 	str	r7, [tsk, #TI_PREEMPT]
 #endif
 
 	irq_handler
 #ifdef CONFIG_PREEMPT
+/*
+把preempt_count的值加载到r0..
+把r8保存回去...相当于前面递增的计数给递减回来了.
+*/
 	ldr	r0, [tsk, #TI_PREEMPT]
 	str	r8, [tsk, #TI_PREEMPT]
+/*
+r0和r7,分别保存进入到ISR和退出ISR的preempt_count的计数..
+这里是以防在ISR中对preempt没有成对的操作而引起的错误。
+*/
 	teq	r0, r7
+/*
+如果抢占计数被破坏，那就设置为0
+*/
 	strne	r0, [r0, -r0]
 #endif
 #ifdef CONFIG_TRACE_IRQFLAGS
@@ -1035,6 +1070,10 @@ __kuser_helper_end:
 	.align	5
 
 vector_\name:
+/*
+correction用于调整lr的值。这是因为进入异常时，pc指针是发生异常时的指针后面8个字节或者12个字节处。
+不同的异常需要跳转到不同的返回地址。有的需要重新执行指令，有的则需要跳到下一条指令处。
+*/
 	.if \correction
 	sub	lr, lr, #\correction
 	.endif
@@ -1043,13 +1082,29 @@ vector_\name:
 	@ Save r0, lr_<exception> (parent PC) and spsr_<exception>
 	@ (parent CPSR)
 	@
+/*
+使用的是stm..保存r0和lr到堆栈..但是并没有改变sp寄存器的值.这里存放进入到堆栈
+是因为r0和lr在后面会用到这2个寄存器.
+*/
 	stmia	sp, {r0, lr}		@ save r0, lr
+/*
+这里使用lr寄存器来保存spsr,spsr是发生中断的时候保存的标记寄存器.等退出中断的时候
+还要恢复标记寄存器的。
+*/
 	mrs	lr, spsr
+/*
+相当于把spsr保存到堆栈..这里的SP一样是没有改变.
+因此sp+0 -> r0, sp+4 -> lr, sp+8 -> spsr.
+*/
 	str	lr, [sp, #8]		@ save spsr
 
 	@
 	@ Prepare for SVC32 mode.  IRQs remain disabled.
 	@
+/*
+准备切换到svc模式，一旦切换过去..那样堆栈也就会使用svc的堆栈了.
+当前操作的还仅仅是spsr..这个是备份的状态寄存器.
+*/
 	mrs	r0, cpsr
 	eor	r0, r0, #(\mode ^ SVC_MODE)
 	msr	spsr_cxsf, r0
@@ -1057,9 +1112,32 @@ vector_\name:
 	@
 	@ the branch table must immediately follow this code
 	@
+/*
+还记得前面的lr保存着的是发生中断时候的标记寄存器..也就是可以知道发生中断的时候在在什么模式下面.
+因为它和0x0f与一下..
+ @#define USR_MODE 0x00000010
+ @#define FIQ_MODE 0x00000011
+ @#define IRQ_MODE 0x00000012
+ @#define SVC_MODE 0x00000013
+ @#define ABT_MODE 0x00000017
+ @#define UND_MODE 0x0000001b
+ @#define SYSTEM_MODE 0x0000001f
+*/
 	and	lr, lr, #0x0f
+/*
+这个sp还是中断模式下的堆栈...它指向着发生中断时候，硬件会保存的寄存器上下文..也就是pt_regs.
+保存到r0,因为它可以作为C函数接口的参数.!
+*/
 	mov	r0, sp
+/*
+会根据中断前所处的模式，跳转到不同的地方进行执行...
+假设为usr模式下发生中断,pc + 4 * 0, 对应跳转到__irq_usr
+	  svc模式下发生中断,pc + 4 * 3, 对应跳转到__irq_svc
+*/
 	ldr	lr, [pc, lr, lsl #2]
+/*
+很重要的是..指令后面加了个s..它会让spsr -> cpsr..完成从中断模式到svc模式的切换!!!
+*/
 	movs	pc, lr			@ branch to handler in SVC mode
 ENDPROC(vector_\name)
 	.endm

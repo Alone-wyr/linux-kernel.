@@ -367,12 +367,14 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 然后会清除IF标记，接着进入到中断处理过程。
 清除IF标记意味着说，关闭了CPU的中断，此时就需要判断说，处理过程是否真的需要关闭，
 不让其他中断嵌套进来..
+注意，进入到该函数时候，中断是关闭的。此时判断是否设置了DISABLED标记来确定是否开启中断。
 */
 	if (!(action->flags & IRQF_DISABLED))
 		local_irq_enable_in_hardirq();
 
 	do {
 		trace_irq_handler_entry(irq, action);
+		///好!!!这里就是调用了中断处理函数了...
 		ret = action->handler(irq, action->dev_id);
 		trace_irq_handler_exit(irq, action, ret);
 
@@ -417,6 +419,7 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 		}
 
 		retval |= ret;
+		//因为..中断线可能是共享的,因此可能有多个中断处理函数。
 		action = action->next;
 	} while (action);
 
