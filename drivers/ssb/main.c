@@ -1202,6 +1202,11 @@ void * ssb_dma_alloc_consistent(struct ssb_device *dev, size_t size,
 		return pci_alloc_consistent(dev->bus->host_pci, size, dma_handle);
 #endif
 	case SSB_BUSTYPE_SSB:
+		/*
+		DMA操作需要物理地址...而CPU视角来说，它传递到地址总线的是虚拟地址...下面函数分配一段内存出来..
+		同时会得到物理地址和虚拟地址分别给DMA和CPU使用..
+		dma_handle存放物理地址，返回值为虚拟地址，size为请求分配作为DMA使用的内存大小.
+		*/
 		return dma_alloc_coherent(dev->dev, size, dma_handle, gfp_flags);
 	default:
 		__ssb_dma_not_implemented(dev);

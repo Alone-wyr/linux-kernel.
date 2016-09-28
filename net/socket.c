@@ -482,7 +482,13 @@ static struct socket *sock_alloc(void)
 {
 	struct inode *inode;
 	struct socket *sock;
-
+/*
+struct socket_alloc {
+	struct socket socket;
+	struct inode vfs_inode;
+};
+这里分配的是socket_alloc结构体!!
+*/
 	inode = new_inode(sock_mnt->mnt_sb);
 	if (!inode)
 		return NULL;
@@ -1678,7 +1684,11 @@ SYSCALL_DEFINE6(sendto, int, fd, void __user *, buff, size_t, len,
 	struct msghdr msg;
 	struct iovec iov;
 	int fput_needed;
-
+	
+	/* 通过文件描述符fd，找到对应的socket实例。 
+	 * 以fd为索引从当前进程的文件描述符表files_struct实例中找到对应的file实例， \
+	 * 然后从file实例的private_data成员中获取socket实例。 
+	 */ 
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (!sock)
 		goto out;
@@ -1687,11 +1697,13 @@ SYSCALL_DEFINE6(sendto, int, fd, void __user *, buff, size_t, len,
 	iov.iov_len = len;
 	msg.msg_name = NULL;
 	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
+	//只有1个.
+	msg.msg_iovlen = 1;.
 	msg.msg_control = NULL;
 	msg.msg_controllen = 0;
 	msg.msg_namelen = 0;
 	if (addr) {
+		//把套接字地址从用户空间拷贝到内核空间.
 		err = move_addr_to_kernel(addr, addr_len, (struct sockaddr *)&address);
 		if (err < 0)
 			goto out_put;

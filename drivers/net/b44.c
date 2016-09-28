@@ -648,14 +648,28 @@ static int b44_alloc_rx_skb(struct b44 *bp, int src_idx, u32 dest_idx_unmasked)
 	if (src_idx >= 0)
 		src_map = &bp->rx_buffers[src_idx];
 	dest_idx = dest_idx_unmasked & (B44_RX_RING_SIZE - 1);
+/*
+可以认为rx_buffers就是一个数组....
+struct b44 {
+	...
+	struct ring_info	*rx_buffers;
+	...
+};
+struct ring_info {
+	struct sk_buff		*skb;
+	dma_addr_t	mapping;
+};
+
+此外分配RX_PKT_BUF_SZ大小的DMA内存，物理内存保存到struct sk_buff->data字段.
+#define RX_PKT_BUF_SZ		(1536 + RX_PKT_OFFSET)	 RX_PKT_OFFSET的大小作为保存struct rx_header.
+*/
 	map = &bp->rx_buffers[dest_idx];
 	skb = netdev_alloc_skb(bp->dev, RX_PKT_BUF_SZ);
 	if (skb == NULL)
 		return -ENOMEM;
-
-	mapping = ssb_dma_map_single(bp->sdev, skb->data,
-				     RX_PKT_BUF_SZ,
-				     DMA_FROM_DEVICE);
+//映射分配的这段内存...data为起始地址..RX_PKT_BUF_SZ为大小..DMA_FROM_DEVICE为该内存是从DMA->cpu的，CPU视角就是读取数据到内存.
+//返回值mapping为物理地址..
+	mapping = ssb_dma_map_single(bp->sdev, skb->data, RX_PKT_BUF_SZ, DMA_FROM_DEVICE);
 
 	/* Hardware bug work-around, the chip is unable to do PCI DMA
 	   to/from anything above 1GB :-( */
@@ -761,6 +775,9 @@ static int b44_rx(struct b44 *bp, int budget)
 	u32 cons, prod;
 
 	received = 0;
+/*
+
+*/
 	prod  = br32(bp, B44_DMARX_STAT) & DMARX_STAT_CDMASK;
 	prod /= sizeof(struct dma_desc);
 	cons = bp->rx_cons;
@@ -775,6 +792,9 @@ static int b44_rx(struct b44 *bp, int budget)
 		ssb_dma_sync_single_for_cpu(bp->sdev, map,
 					    RX_PKT_BUF_SZ,
 					    DMA_FROM_DEVICE);
+/*
+网卡收到数据会自动添加一个头定义为struct rx_header...28个字节.
+*/
 		rh = (struct rx_header *) skb->data;
 		len = le16_to_cpu(rh->len);
 		if ((len > (RX_PKT_BUF_SZ - RX_PKT_OFFSET)) ||
@@ -797,7 +817,7 @@ static int b44_rx(struct b44 *bp, int budget)
 			if (len == 0)
 				goto drop_it;
 		}
-
+//去掉CRC这4个字节...因此驱动不进行CRC校验...
 		/* Omit CRC. */
 		len -= 4;
 

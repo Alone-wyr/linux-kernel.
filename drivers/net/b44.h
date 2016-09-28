@@ -351,9 +351,9 @@ struct b44 {
 	u32			imask, istat;
 
 	struct dma_desc		*rx_ring, *tx_ring;
-
-	u32			tx_prod, tx_cons;
-	u32			rx_prod, rx_cons;
+	//当前缓冲区最后一个缓冲区号, 正在处理的缓冲区号
+	u32			tx_prod, tx_cons;	
+	u32			rx_prod, rx_cons;	
 
 	struct ring_info	*rx_buffers;
 	struct ring_info	*tx_buffers;
@@ -391,8 +391,8 @@ struct b44 {
 	struct net_device	*dev;
 
 	dma_addr_t		rx_ring_dma, tx_ring_dma;
-
-	u32			rx_pending;
+	//	缓冲区个数...
+	u32			rx_pending;	
 	u32			tx_pending;
 	u8			phy_addr;
 	u8			force_copybreak;

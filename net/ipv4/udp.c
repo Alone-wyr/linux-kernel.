@@ -131,18 +131,22 @@ static int udp_lib_lport_inuse(struct net *net, __u16 num,
 {
 	struct sock *sk2;
 	struct hlist_nulls_node *node;
-
+//sock->sk_nulls_node作为结点添加到链表上..
 	sk_nulls_for_each(sk2, node, &hslot->head)
-		if (net_eq(sock_net(sk2), net)			&&
-		    sk2 != sk					&&
-		    (bitmap || sk2->sk_hash == num)		&&
-		    (!sk2->sk_reuse || !sk->sk_reuse)		&&
-		    (!sk2->sk_bound_dev_if || !sk->sk_bound_dev_if
+		if (net_eq(sock_net(sk2), net)			&&				//--判断是不是同一个网络空间名称.
+		    sk2 != sk					&&						//-- 判断是不是同一个struct sock.
+		    (bitmap || sk2->sk_hash == num)		&&				//-- 
+		    (!sk2->sk_reuse || !sk->sk_reuse)		&&				//-- 判断端口是不是可以多次使用(reuse).
+		    (!sk2->sk_bound_dev_if || !sk->sk_bound_dev_if			//-- 判断是不是都有绑定网卡..同时是不是绑定同一个网卡.
 			|| sk2->sk_bound_dev_if == sk->sk_bound_dev_if) &&
 		    (*saddr_comp)(sk, sk2)) {
+	/*
+	    前面一大堆判断条件...直到这里的话...就代表这个端口不可以使用，会和其他socket产生冲突..
+	    对于动态分配的话，bitmap的每一位记录该端口号是否被使用了..
+	    而对于绑定端口号的话，传递进来的bitmap 为NULL...此时只是简单的判断返回值0/1来确定绑定的端口号是否可以使用.!!
+	*/
 			if (bitmap)
-				__set_bit(sk2->sk_hash / UDP_HTABLE_SIZE,
-					  bitmap);
+				__set_bit(sk2->sk_hash / UDP_HTABLE_SIZE, bitmap);
 			else
 				return 1;
 		}
@@ -166,26 +170,33 @@ int udp_lib_get_port(struct sock *sk, unsigned short snum,
 	struct net *net = sock_net(sk);
 
 	if (!snum) {
+		//如果为0...那就是需要去分配一个端口出来.
 		int low, high, remaining;
 		unsigned rand;
 		unsigned short first, last;
 		DECLARE_BITMAP(bitmap, PORTS_PER_CHAIN);
-
+		//端口的取值范围...
 		inet_get_local_port_range(&low, &high);
+		//取值范围内端口可用数目.
 		remaining = (high - low) + 1;
-
+		//随机选取一个端口...32bit的数值.
 		rand = net_random();
+		//计算随机数的时候临时转化为了64bit..但是first是定义为unsigned short类型的16bit..我们也知道端口的范围也是16bit的.
 		first = (((u64)rand * remaining) >> 32) + low;
 		/*
 		 * force rand to be an odd multiple of UDP_HTABLE_SIZE
 		 */
 		rand = (rand | 1) * UDP_HTABLE_SIZE;
 		for (last = first + UDP_HTABLE_SIZE; first != last; first++) {
+			//last设置为first + UDP_HTABLE_SIZE..保证了可以遍历udptable里面所有的哈希数组项，设置为UDP_HTABLE_SIZE个项.
+			//这里取出一个数组项出来查找....
 			hslot = &udptable->hash[udp_hashfn(net, first)];
+			//可以认为把所有端口号分成PORTS_PER_CHAIN份，每份拥有的端口号数目就是(所有端口号数目 / PORTS_PER_CHAIN)
+			//而这里bitma定义的就是一份的大小..1bit代表一个端口...
 			bitmap_zero(bitmap, PORTS_PER_CHAIN);
 			spin_lock_bh(&hslot->lock);
-			udp_lib_lport_inuse(net, snum, hslot, bitmap, sk,
-					    saddr_comp);
+			//bitmap记录了这份端口里面已经使用的端口，就会设置对应bit为1...
+			udp_lib_lport_inuse(net, snum, hslot, bitmap, sk, saddr_comp);
 
 			snum = first;
 			/*
@@ -193,6 +204,7 @@ int udp_lib_get_port(struct sock *sk, unsigned short snum,
 			 * Using steps of an odd multiple of UDP_HTABLE_SIZE
 			 * give us randomization and full range coverage.
 			 */
+			 //前面bitmap得到了这份端口的使用情况...那么剩下的工作就是遍历这个bitmap找到没有被置位的bit咯.
 			do {
 				if (low <= snum && snum <= high &&
 				    !test_bit(snum / UDP_HTABLE_SIZE, bitmap))
@@ -203,8 +215,10 @@ int udp_lib_get_port(struct sock *sk, unsigned short snum,
 		}
 		goto fail;
 	} else {
+	//不为0的情况..就是说要使用绑定的端口来作为源端口.
 		hslot = &udptable->hash[udp_hashfn(net, snum)];
 		spin_lock_bh(&hslot->lock);
+	//下面函数如果返回1，代表和已经存在的端口是冲突的...否则就是可以使用的咯.
 		if (udp_lib_lport_inuse(net, snum, hslot, NULL, sk, saddr_comp))
 			goto fail_unlock;
 	}
@@ -212,6 +226,8 @@ found:
 	inet_sk(sk)->num = snum;
 	sk->sk_hash = snum;
 	if (sk_unhashed(sk)) {
+		//前面有看到判断端口号是否使用..是遍历一个链表..然后得到结点相当于得到struct sock.就知道了端口号了.
+		//这里取得了可使用的端口号..那也就需要把这个struct sock->sk_nulls_node作为结点添加到链表..表示该端口号被我占用了.
 		sk_nulls_add_node_rcu(sk, &hslot->head);
 		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 	}

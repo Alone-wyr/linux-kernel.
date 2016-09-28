@@ -122,14 +122,14 @@ struct sock_common {
 	unsigned short		skc_family;
 	volatile unsigned char	skc_state;
 	unsigned char		skc_reuse;
-	int			skc_bound_dev_if;
+	int			skc_bound_dev_if;		//如果绑定了出口网卡..那么index不为0.  ?
 	union {
 		struct hlist_node	skc_node;
 		struct hlist_nulls_node skc_nulls_node;
 	};
 	struct hlist_node	skc_bind_node;
 	atomic_t		skc_refcnt;
-	unsigned int		skc_hash;
+	unsigned int		skc_hash;			//  ---源端口号...
 	struct proto		*skc_prot;
 #ifdef CONFIG_NET_NS
 	struct net	 	*skc_net;
@@ -215,7 +215,7 @@ struct sock {
 #define sk_nulls_node		__sk_common.skc_nulls_node
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_refcnt		__sk_common.skc_refcnt
-#define sk_hash			__sk_common.skc_hash
+#define sk_hash			__sk_common.skc_hash		//  ---源端口号...
 #define sk_prot			__sk_common.skc_prot
 #define sk_net			__sk_common.skc_net
 	unsigned char		sk_shutdown : 2,
