@@ -358,9 +358,19 @@ handle_level_irq(unsigned int irq, struct irq_desc *desc)
 	irqreturn_t action_ret;
 
 	spin_lock(&desc->lock);
+	/*
+	调用中断线所属的中断控制的mask_ack函数.
+	如果没有定义该函数，就调用mask，然后调用ack函数.
+	总之，对于水平触发的来说，它就是屏蔽当前的中断线，应当当前中断..
+	比如ARM来说，就是清除SRCPND、SRCINTPND寄存器的位.
+	*/
 	mask_ack_irq(desc, irq);
 	desc = irq_remap_to_desc(irq, desc);
-
+	/*
+	在多处理器的系统上，可能中断已经被另外一个CPU开始处理..但是该CPU也
+	进入到进入处理..此时另外处理的CPU会设置状态为正在处理当中..
+	因此，当前CPU就直接退出。
+	*/
 	if (unlikely(desc->status & IRQ_INPROGRESS))
 		goto out_unlock;
 	desc->status &= ~(IRQ_REPLAY | IRQ_WAITING);
@@ -371,9 +381,15 @@ handle_level_irq(unsigned int irq, struct irq_desc *desc)
 	 * keep it masked and get out of here
 	 */
 	action = desc->action;
+	/*
+	如果该中断线上没有中断处理函数，那就直接退出.
+	或者说，该中断线当前状态是DISABLED，也就是要屏蔽掉该中断的..?
+	但是由于某种原因还产生了中断?不过确实状态就是DISABLED，那也直接退出。
+	*/
 	if (unlikely(!action || (desc->status & IRQ_DISABLED)))
 		goto out_unlock;
-
+	//好这里设置为正在处理当中...避免多处理的竞争...哦。这断代码的执行
+	//是在上锁的状态下的..下面解锁.
 	desc->status |= IRQ_INPROGRESS;
 	spin_unlock(&desc->lock);
 
@@ -382,7 +398,10 @@ handle_level_irq(unsigned int irq, struct irq_desc *desc)
 		note_interrupt(irq, desc, action_ret);
 
 	spin_lock(&desc->lock);
+	//处理完成之后..这里要修改当前中断线的状态了..一样是上锁.
 	desc->status &= ~IRQ_INPROGRESS;
+	//该中断线的状态是不屏蔽的，并且有unmask函数..那就调用unmask，它就是
+	//取消屏蔽该中断线...因为水平电流处理函数在一开始有mask_ack_irq给屏蔽掉了中断线了
 	if (!(desc->status & IRQ_DISABLED) && desc->chip->unmask)
 		desc->chip->unmask(irq);
 out_unlock:
@@ -463,7 +482,9 @@ void
 handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 {
 	spin_lock(&desc->lock);
-
+	/*
+	需要同水平电流处理函数对比，这里并没有调用mask_ack函数，来屏蔽中断线.
+	*/
 	desc->status &= ~(IRQ_REPLAY | IRQ_WAITING);
 
 	/*
@@ -471,15 +492,25 @@ handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 	 * we shouldn't process the IRQ. Mark it pending, handle
 	 * the necessary masking and go out
 	 */
+	/*
+	如果边缘电平的触发，然后引起了一个中断，处理函数会对该中断线设置为正在处理当中.
+	也就是IRQ_INPROGRESS标记..此时判断判断IRQ_INPROGRESS如果置位，代表是又一个中断发生了
+	因为是边缘触发的..那就设置status为PENDING挂机，等待处理.
+	*/
 	if (unlikely((desc->status & (IRQ_INPROGRESS | IRQ_DISABLED)) ||
 		    !desc->action)) {
 		desc->status |= (IRQ_PENDING | IRQ_MASKED);
+		//已经PENDING了一次处理，这时候特殊处理，屏蔽掉该中断..然后应答该中断线.
+		//上面status设置为IRQ_MASKED，也可以证实这个情况.
 		mask_ack_irq(desc, irq);
 		desc = irq_remap_to_desc(irq, desc);
 		goto out_unlock;
 	}
 	kstat_incr_irqs_this_cpu(irq, desc);
-
+	/*
+	当然..更一般的情况是下面这种...它会调用应答ack.!!注意注意...和水平触发的区别来了.
+	水平触发是mask_ack!!!
+	*/
 	/* Start handling the irq */
 	if (desc->chip->ack)
 		desc->chip->ack(irq);
@@ -491,7 +522,7 @@ handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 	do {
 		struct irqaction *action = desc->action;
 		irqreturn_t action_ret;
-
+		//如果该中断线没有中断处理函数..那屏蔽掉该中断线..然后退出.
 		if (unlikely(!action)) {
 			desc->chip->mask(irq);
 			goto out_unlock;
@@ -505,17 +536,22 @@ handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 		if (unlikely((desc->status &
 			       (IRQ_PENDING | IRQ_MASKED | IRQ_DISABLED)) ==
 			      (IRQ_PENDING | IRQ_MASKED))) {
+	//前面有看到..到中断处理过程中再次引起中断，就会挂机该中断，然后屏蔽中断线.
+	//此时这里，就是重新设置为不屏蔽的..
 			desc->chip->unmask(irq);
 			desc->status &= ~IRQ_MASKED;
 		}
 
 		desc->status &= ~IRQ_PENDING;
 		spin_unlock(&desc->lock);
+		//释放锁...进入到处理中断函数中去.
 		action_ret = handle_IRQ_event(irq, action);
 		if (!noirqdebug)
 			note_interrupt(irq, desc, action_ret);
+		//中断处理函数处理完成了...然后还要继续判断在处理过程中是否有新的中断产生.
 		spin_lock(&desc->lock);
-
+			//因为对于边缘触发的中断来说，它的处理过程，可能有引起了中断了的发生了.
+			//此时会设置status带IRQ_PENDING标记.那就需要在继续执行一遍处理函数.
 	} while ((desc->status & (IRQ_PENDING | IRQ_DISABLED)) == IRQ_PENDING);
 
 	desc->status &= ~IRQ_INPROGRESS;

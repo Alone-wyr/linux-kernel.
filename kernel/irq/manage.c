@@ -522,7 +522,8 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 
 	if (!desc)
 		return -EINVAL;
-
+	
+//	 该中断线是否有属于某个中断控制器。
 	if (desc->chip == &no_irq_chip)
 		return -ENOSYS;
 	/*
@@ -546,6 +547,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * Threaded handler ?
 	 */
 	if (new->thread_fn) {
+//		中断线程化先不管。
 		struct task_struct *t;
 
 		t = kthread_create(irq_thread, new, "irq/%d-%s", irq,
@@ -570,6 +572,12 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	old = *old_ptr;
 	if (old) {
 		/*
+		    如果old不为NULL，那就代表该中断线已经有了处理函数了，因为该中断线应该就是共享的才是对的。
+        这里判断两件事情：
+            1.是不是原本注册时候，就设置为了共享模式。然后现在注册的，也是设置为共享模式。
+            2.既然是共享中断线，那对于触发条件应该是要一致的。不能说一个为水平，一个为边缘。这样都是不合理的。
+		*/
+		/*
 		 * Can't share interrupts unless both agree to and are
 		 * the same type (level, edge, polarity). So both flag
 		 * fields must have IRQF_SHARED set and the bits which
@@ -587,7 +595,8 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		    (new->flags & IRQF_PERCPU))
 			goto mismatch;
 #endif
-
+		//  上面判断通过后，就添加到中断处理函数链表末尾。后面才真的添加
+		// 这里只是确定了下添加的位置.
 		/* add new interrupt at end of irq queue */
 		do {
 			old_ptr = &old->next;
@@ -600,7 +609,8 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		irq_chip_set_defaults(desc->chip);
 
 		init_waitqueue_head(&desc->wait_for_threads);
-
+		
+		//不属于共享的，那就是刚刚注册了该中断线。此时根据flags来设定它的触发
 		/* Setup the type (level, edge polarity) if configured: */
 		if (new->flags & IRQF_TRIGGER_MASK) {
 			ret = __irq_set_trigger(desc, irq,
@@ -615,11 +625,12 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 			desc->status |= IRQ_PER_CPU;
 #endif
 
-		desc->status &= ~(IRQ_AUTODETECT | IRQ_WAITING |
-				  IRQ_INPROGRESS | IRQ_SPURIOUS_DISABLED);
-
+		desc->status &= ~(IRQ_AUTODETECT | IRQ_WAITING | IRQ_INPROGRESS | IRQ_SPURIOUS_DISABLED);
+	//判断在处理过程中..是否enable该中断..也就是是否允许嵌套同个编号的中断.
+	//如果flag有IRQ_NOAUTOEN则不允许嵌套.
 		if (!(desc->status & IRQ_NOAUTOEN)) {
 			desc->depth = 0;
+			//允许嵌套..因此该标记为需要清除掉..允许中断服务过程发生同类型中断.
 			desc->status &= ~IRQ_DISABLED;
 			desc->chip->startup(irq);
 		} else
@@ -641,7 +652,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 				irq, (int)(desc->status & IRQ_TYPE_SENSE_MASK),
 				(int)(new->flags & IRQF_TRIGGER_MASK));
 	}
-
+	//中断线和中断处理函数链接。
 	*old_ptr = new;
 
 	/* Reset broken irq detection when installing new handler */
@@ -658,7 +669,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	}
 
 	spin_unlock_irqrestore(&desc->lock, flags);
-
+//    设置了下中断处理函数属于的中断线.
 	new->irq = irq;
 	register_irq_proc(irq, desc);
 	new->dir = NULL;

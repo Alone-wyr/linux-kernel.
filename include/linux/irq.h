@@ -311,6 +311,10 @@ static inline void generic_handle_irq_desc(unsigned int irq, struct irq_desc *de
 #ifdef CONFIG_GENERIC_HARDIRQS_NO__DO_IRQ
 	desc->handle_irq(irq, desc);
 #else
+ /*   描述中断线结构体的字段handle_irq，在（一）中，有提到过，该函数是电流处理函数。
+    通过likely也可以知道，对于通常情况，都会对中断线设定它的电流处理函数。然而电流处理函数有
+    多种，比如电平处理函数：handle_level_irq、或者是边缘触发函数：handle_edge_irq。
+*/
 	if (likely(desc->handle_irq))
 		desc->handle_irq(irq, desc);
 	else
