@@ -210,6 +210,9 @@ struct sock {
 #define sk_family		__sk_common.skc_family
 #define sk_state		__sk_common.skc_state
 #define sk_reuse		__sk_common.skc_reuse
+/*
+setsockopt SO_BINDTODEVICE选项..绑定接口...那么socket只能接受和发送指定接口的数据..
+*/
 #define sk_bound_dev_if		__sk_common.skc_bound_dev_if
 #define sk_node			__sk_common.skc_node
 #define sk_nulls_node		__sk_common.skc_nulls_node

@@ -128,6 +128,9 @@ struct inet_sock {
 	__u8			recverr:1,
 				is_icsk:1,
 				freebind:1,
+/*
+setsockopt: IP_HDRINCL选项...可以填充IP数据包..
+*/
 				hdrincl:1,
 				mc_loop:1,
 				transparent:1;

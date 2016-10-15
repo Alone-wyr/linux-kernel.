@@ -1799,9 +1799,14 @@ int dev_queue_xmit(struct sk_buff *skb)
 	int rc = -ENOMEM;
 
 	/* GSO will handle the following emulations directly. */
+//判断网卡是否支持GSO...
 	if (netif_needs_gso(dev, skb))
 		goto gso;
-
+    //首先判断skb是否被分段，如果分了段并且网卡不支持分散读的话需要将所有段重新组合成一个段     
+    //这里__skb_linearize其实就是__pskb_pull_tail(skb, skb->data_len),这个函数基本上等同于pskb_may_pull     
+    //pskb_may_pull的作用就是检测skb对应的主buf中是否有足够的空间来pull出len长度，     
+    //如果不够就重新分配skb并将frags中的数据拷贝入新分配的主buff中，而这里将参数len设置为skb->datalen，     
+    //也就是会将所有的数据全部拷贝到主buff中，以这种方式完成skb的线性化   
 	if (skb_shinfo(skb)->frag_list &&
 	    !(dev->features & NETIF_F_FRAGLIST) &&
 	    __skb_linearize(skb))
@@ -1811,6 +1816,9 @@ int dev_queue_xmit(struct sk_buff *skb)
 	 * or if at least one of fragments is in highmem and device
 	 * does not support DMA from it.
 	 */
+	 //如果上面已经线性化了一次，这里的__skb_linearize就会直接返回     
+         //注意区别frags和frag_list，     
+         //前者是将多的数据放到单独分配的页面中，sk_buff只有一个。而后者则是连接多个sk_buff
 	if (skb_shinfo(skb)->nr_frags &&
 	    (!(dev->features & NETIF_F_SG) || illegal_highdma(dev, skb)) &&
 	    __skb_linearize(skb))
@@ -1819,6 +1827,7 @@ int dev_queue_xmit(struct sk_buff *skb)
 	/* If packet is not checksummed and device does not support
 	 * checksumming for this protocol, complete checksumming here.
 	 */
+	 /* 如果此包的校验和还没有计算并且驱动不支持硬件校验和计算，那么需要在这里计算校验和*/
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
 		skb_set_transport_header(skb, skb->csum_start -
 					      skb_headroom(skb));
@@ -1831,13 +1840,22 @@ gso:
 	 * stops preemption for RCU.
 	 */
 	rcu_read_lock_bh();
-
+	//选择一个发送队列，如果设备提供了select_queue回调函数就使用它，否则由内核选择一个队列	   
+	//大部分驱动都不会设置多个队列，而是在调用alloc_etherdev分配net_device时将队列个数设置为1	  
+	//也就是只有一个队列	 
 	txq = dev_pick_tx(dev, skb);
+	//从netdev_queue结构上取下设备的qdisc
 	q = rcu_dereference(txq->qdisc);
 
 #ifdef CONFIG_NET_CLS_ACT
 	skb->tc_verd = SET_TC_AT(skb->tc_verd,AT_EGRESS);
 #endif
+	//上面说大部分驱动只有一个队列，但是只有一个队列也不代表设备准备使用它	   
+	//这里检查这个队列中是否有enqueue函数，如果有则说明设备会使用这个队列，否则需另外处理	  
+	//关于enqueue函数的设置，我找到dev_open->dev_activate中调用了qdisc_create_dflt来设置，	   
+	//不知道一般驱动怎么设置这个queue	  
+	//需要注意的是，这里并不是将传进来的skb直接发送，而是先入队，然后调度队列， 	
+	//具体发送哪个包由enqueue和dequeue函数决定，这体现了设备的排队规则
 	if (q->enqueue) {
 		spinlock_t *root_lock = qdisc_lock(q);
 
@@ -1867,6 +1885,11 @@ gso:
 	   Check this and shot the lock. It is not prone from deadlocks.
 	   Either shot noqueue qdisc, it is even simpler 8)
 	 */
+	 //要确定设备是开启的，下面还要确定队列是运行的。启动和停止队列由驱动程序决定     
+   	 //详见ULNI中文版P251     
+    	//如上面英文注释所说，设备没有输出队列典型情况是回环设备     
+    	//我们所要做的就是直接调用驱动的hard_start_xmit将它发送出去     
+   	 //如果发送失败就直接丢弃，因为没有队列可以保存它   
 	if (dev->flags & IFF_UP) {
 		int cpu = smp_processor_id(); /* ok because BHs are off */
 
@@ -1876,6 +1899,10 @@ gso:
 
 			if (!netif_tx_queue_stopped(txq)) {
 				rc = 0;
+				//对于loopback设备，它的hard_start_xmit函数是loopback_xmit     
+               		 	//我们可以看到，在loopback_xmit末尾直接调用了netif_rx函数     
+                		//将带发送的包直接接收了回来     
+               			 //这个函数下面具体分析，返回0表示成功，skb已被free    
 				if (!dev_hard_start_xmit(skb, dev, txq)) {
 					HARD_TX_UNLOCK(dev, txq);
 					goto out;

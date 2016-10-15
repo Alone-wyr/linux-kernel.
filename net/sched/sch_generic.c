@@ -180,7 +180,14 @@ static inline int qdisc_restart(struct Qdisc *q)
 void __qdisc_run(struct Qdisc *q)
 {
 	unsigned long start_time = jiffies;
-
+/*
+循环调用qdisc_restart发送数据
+这个函数qdisc_restart是真正发送数据包的函数
+它从队列上取下一个帧，然后尝试将它发送出去
+若发送失败则一般是重新入队。
+此函数返回值为：发送成功时返回剩余队列长度
+发送失败时返回0（若发送成功且剩余队列长度为0也返回0）
+*/
 	while (qdisc_restart(q)) {
 		/*
 		 * Postpone processing if
@@ -188,6 +195,7 @@ void __qdisc_run(struct Qdisc *q)
 		 * 2. we've been doing it for too long.
 		 */
 		if (need_resched() || jiffies != start_time) {
+			//当需要进行调度或者时间超过了1个时间片的时候就退出循环，退出之前发出软中断请求
 			__netif_schedule(q);
 			break;
 		}

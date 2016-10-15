@@ -115,6 +115,11 @@ struct xt_counters
 };
 
 /* The argument to IPT_SO_ADD_COUNTERS. */
+/*
+对于IPT_SO_ADD_COUNTERS这个cmd使用的结构体..用户空间传递过来的数据就是由该结构体定义然后还有n个struct xt_counters.
+内核需要从用户空间中拷贝数据...那就是先拷贝sizeof(struct xt_counters_info)的大小..然后在加上n个struct xt_counters..
+至于多少个..通过字段num_counters来确定.!!
+*/
 struct xt_counters_info
 {
 	/* Which table. */
