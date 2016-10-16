@@ -81,7 +81,9 @@
 #define	IPOPT_TS_PRESPEC	3		/* specified modules only */
 
 #define IPV4_BEET_PHMAXLEN 8
-
+/*
+ihl:首部长度,,单位为4字节...因此首部长度最大为 15 * 4 = 20...15是因为只有4bit.
+*/
 struct iphdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
 	__u8	ihl:4,

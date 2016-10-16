@@ -75,7 +75,18 @@ struct ipt_ip {
 
 /* This structure defines each of the firewall rules.  Consists of 3
    parts which are 1) general IP header stuff 2) match specific
-   stuff 3) the target to perform if the rule matches */
+   stuff 3) the target to perform if the rule matches 
+   每条规则都由该结构体来定义，它包含3个部分，分别是
+   general ip header stuff						通用ip头成员			struct ipt_ip
+   match specific stuff							特定匹配成员			ipt_entry_match(struct xt_entry_match)
+   the target to perform if the rule matchs.	匹配规则后的目标动作.   ipt_entry_target(struct xt_entry_target)
+   标准target就是那些ACCEPT、DROP、REJECT等等之类的处理方式；
+   扩展target就是那些诸如DNAT、SNAT等以模块形式存在的target了。
+   对于标准的target，它是不需要ipt_target{}结构的，即ipt_entry_target{}中的target属性为NULL；
+   而对于我们自己扩展target是需要我们自己手工去实现ipt_target{}对象，并完成相关回调函数的编写。
+   对于ipt_target{}结构体中target回调函数的编写有一点要注意：该函数必须向Netfilter框架返回
+   IPT_CONTINUE、或者诸如NF_ACCEPT、NF_DROP之类的值。
+   */
 struct ipt_entry
 {
 	struct ipt_ip ip;

@@ -148,8 +148,7 @@ static void hrtimer_get_softirq_time(struct hrtimer_cpu_base *base)
 	xtim = timespec_to_ktime(xts);
 	tomono = timespec_to_ktime(tom);
 	base->clock_base[CLOCK_REALTIME].softirq_time = xtim;
-	base->clock_base[CLOCK_MONOTONIC].softirq_time =
-		ktime_add(xtim, tomono);
+	base->clock_base[CLOCK_MONOTONIC].softirq_time = ktime_add(xtim, tomono);
 }
 
 /*
@@ -691,6 +690,12 @@ static int hrtimer_switch_to_hres(void)
 	base->hres_active = 1;
 	base->clock_base[CLOCK_REALTIME].resolution = KTIME_HIGH_RES;
 	base->clock_base[CLOCK_MONOTONIC].resolution = KTIME_HIGH_RES;
+/*
+	因为tick_device被高精度定时器接管，
+	它将不会再提供原有的tick事件机制，
+	所以需要由高精度定时器系统模拟一个tick事件设备，
+	继续为系统提供tick事件能力，这个工作由tick_setup_sched_timer函数完成。
+	*/
 
 	tick_setup_sched_timer();
 
@@ -1151,6 +1156,11 @@ static void __run_hrtimer(struct hrtimer *timer)
 	WARN_ON(!irqs_disabled());
 
 	debug_hrtimer_deactivate(timer);
+	/*
+	hrtimer_interrupt->__run_hrtimer这个分支来说..timer就是由base->first指向的代表第一个
+		到底的定时器.下面函数会把该定时器从rb-tree上remove掉..然后设置定时器的state为HRTIMER_STATE_CALLBACK
+		同时更新first指向下一个要到期的timer.
+	*/
 	__remove_hrtimer(timer, base, HRTIMER_STATE_CALLBACK, 0);
 	timer_stats_account_hrtimer(timer);
 	fn = timer->function;
@@ -1161,6 +1171,9 @@ static void __run_hrtimer(struct hrtimer *timer)
 	 * the timer base.
 	 */
 	spin_unlock(&cpu_base->lock);
+	/*
+	高精度的定时器函数返回值代表对该timer 是否要restart.!!
+	*/
 	restart = fn(timer);
 	spin_lock(&cpu_base->lock);
 
@@ -1170,6 +1183,9 @@ static void __run_hrtimer(struct hrtimer *timer)
 	 * hrtimer_start_range_ns() or in hrtimer_interrupt()
 	 */
 	if (restart != HRTIMER_NORESTART) {
+		/*
+		如果需要restart...那就重新加入到rb-tree里面咯.
+		*/
 		BUG_ON(timer->state != HRTIMER_STATE_CALLBACK);
 		enqueue_hrtimer(timer, base);
 	}
@@ -1229,6 +1245,10 @@ void hrtimer_interrupt(struct clock_event_device *dev)
 	base = cpu_base->clock_base;
 
 	for (i = 0; i < HRTIMER_MAX_CLOCK_BASES; i++) {
+		/*
+		在这个循环里面会check是否有定时器超时了,需要调用它的处理函数.
+		时钟基础的first指向的是对于它来说第一个到期的时间.
+		*/
 		ktime_t basenow;
 		struct rb_node *node;
 
@@ -1255,25 +1275,35 @@ void hrtimer_interrupt(struct clock_event_device *dev)
 			 */
 
 			if (basenow.tv64 < hrtimer_get_softexpires_tv64(timer)) {
+				//如果第一个到期的定时器是在未来...也就是说这个时钟中断内，没有定时器超时.
+				//那么就记录一下下一次要触发的时间..然后break.
 				ktime_t expires;
 
-				expires = ktime_sub(hrtimer_get_expires(timer),
-						    base->offset);
+				expires = ktime_sub(hrtimer_get_expires(timer), base->offset);
 				if (expires.tv64 < expires_next.tv64)
 					expires_next = expires;
 				break;
 			}
-
+			//来到这里代表说，当前这个时钟中断内，有定时器超时了..需要处理!!
 			__run_hrtimer(timer);
 		}
 		spin_unlock(&cpu_base->lock);
 		base++;
 	}
-
+	/*
+	处理完了所有到期的timer后，需要对时钟事件设备重新编程，设置下一次触发的时间..!!!
+	*/
 	cpu_base->expires_next = expires_next;
 
 	/* Reprogramming necessary ? */
 	if (expires_next.tv64 != KTIME_MAX) {
+		/*
+			!= KTIME_MAX的情况下,,那就是需要对时钟事件设备重新编程....
+			如果不等于这个..这时候需要对设备reprogram...如果失败返回1，失败的情况是
+			设定的时间已经超过现在了..那就在重新执行查找定时器。那个定时器的超时时间已经到了.
+			eg:当前时间为1,,,然后下一个定时器的时间为3，此时去reprogram的时候发现当前时间为4了..
+			那就会reprogram失败...然后重新遍历去执行这个定时器.
+		*/
 		if (tick_program_event(expires_next, force_clock_reprogram))
 			goto retry;
 	}
@@ -1357,17 +1387,25 @@ void hrtimer_run_queues(void)
 	struct hrtimer_cpu_base *cpu_base = &__get_cpu_var(hrtimer_bases);
 	struct hrtimer_clock_base *base;
 	int index, gettime = 1;
-
+/*
+	如果系统支持高精度的话...那就直接退出..它不会再这里处理..这个函数只会在
+	每个时钟周期的处理函数里面调用!!!它是实现低精确度定时器的基础.
+*/
 	if (hrtimer_hres_active())
 		return;
-
+/*
+在系统不支持高精度的情况下...处理高精度的定时器方法..
+*/
 	for (index = 0; index < HRTIMER_MAX_CLOCK_BASES; index++) {
 		base = &cpu_base->clock_base[index];
-
+		/*
+			如果first为空...那就是该时钟基础下没有定时器的超时需要处理.
+		*/
 		if (!base->first)
 			continue;
 
 		if (gettime) {
+			//这里相当于获取当前的的时间...获取的目的就是下面让定时器去判断是否超时.!
 			hrtimer_get_softirq_time(cpu_base);
 			gettime = 0;
 		}
@@ -1378,10 +1416,12 @@ void hrtimer_run_queues(void)
 			struct hrtimer *timer;
 
 			timer = rb_entry(node, struct hrtimer, node);
-			if (base->softirq_time.tv64 <=
-					hrtimer_get_expires_tv64(timer))
+			//first是第一个超时的定时器..如果它都没有超时..那代表这个clock base下的定时器
+			//都不会超时..那就可以break了..
+			if (base->softirq_time.tv64 <= hrtimer_get_expires_tv64(timer))
 				break;
-
+			//来到这里代表说fist指定的定时器超时了...那就去执行它的处理函数.
+			//函数内部同时会更新first指向新的定时器.!
 			__run_hrtimer(timer);
 		}
 		spin_unlock(&cpu_base->lock);

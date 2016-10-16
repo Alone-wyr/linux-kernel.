@@ -452,7 +452,9 @@ static noinline void __init_refok rest_init(void)
 	__releases(kernel_lock)
 {
 	int pid;
-
+	/*
+	创建一个内核线程.
+	*/
 	kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND);
 	numa_default_policy();
 	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);

@@ -98,11 +98,15 @@ struct nf_hook_ops
 	struct list_head list;
 
 	/* User fills in from here down. */
+	//钩子函数...
 	nf_hookfn *hook;
 	struct module *owner;
+	//钩子函数所处理的协议...eg: PF_INET
 	u_int8_t pf;
+	//钩子函数的挂载点...
 	unsigned int hooknum;
 	/* Hooks are ordered in ascending priority. */
+	//钩子函数的优先级....
 	int priority;
 };
 
