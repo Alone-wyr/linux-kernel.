@@ -394,13 +394,15 @@ unsigned int nf_nat_packet(struct nf_conn *ct,
 	enum ip_conntrack_dir dir = CTINFO2DIR(ctinfo);
 	unsigned long statusbit;
 	enum nf_nat_manip_type mtype = HOOK2MANIP(hooknum);
-
+	//IP_NAT_MANIP_SRC = 0.
+	//如果是POSTROUITNG或者是INPUT的hook点上...那就是返回mtype = 0...
 	if (mtype == IP_NAT_MANIP_SRC)
 		statusbit = IPS_SRC_NAT;
 	else
 		statusbit = IPS_DST_NAT;
 
 	/* Invert if this is reply dir. */
+	//如果是reply方向..那就颠倒一下..
 	if (dir == IP_CT_DIR_REPLY)
 		statusbit ^= IPS_NAT_MASK;
 

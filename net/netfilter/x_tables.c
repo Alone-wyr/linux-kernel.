@@ -196,7 +196,10 @@ struct xt_match *xt_find_match(u8 af, const char *name, u8 revision)
 
 	if (mutex_lock_interruptible(&xt[af].mutex) != 0)
 		return ERR_PTR(-EINTR);
-
+/*
+给rule查找对应饿match结构体...xt[af].match有系统当前已经注册的match...
+根据比较name和revision来确定是否找到对应的match.
+*/
 	list_for_each_entry(m, &xt[af].match, list) {
 		if (strcmp(m->name, name) == 0) {
 			if (m->revision == revision) {

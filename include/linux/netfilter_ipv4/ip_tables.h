@@ -218,10 +218,10 @@ struct ipt_replace
 struct ipt_get_entries
 {
 	/* Which table: user fills this in. */
-	char name[IPT_TABLE_MAXNAMELEN];
+	char name[IPT_TABLE_MAXNAMELEN];		//-- 作为要获取entryes所属的table...
 
 	/* User fills this in: total entry size. */
-	unsigned int size;
+	unsigned int size;							//-- 传递过来要保存entries的内存空间大小..!!
 
 	/* The entries. */
 	struct ipt_entry entrytable[0];

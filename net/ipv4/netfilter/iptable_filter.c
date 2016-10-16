@@ -31,8 +31,11 @@ static struct
 } initial_table __net_initdata = {
 	.repl = {
 		.name = "filter",
+//这个表有效的挂载点... 前面定义了的....in/forward/out.
 		.valid_hooks = FILTER_VALID_HOOKS,
+// 3个ipt_standard 和 1个ipt_error.
 		.num_entries = 4,
+//根据结构体的定义后面接着   struct ipt_standard entries[3]; + struct ipt_error term;
 		.size = sizeof(struct ipt_standard) * 3 + sizeof(struct ipt_error),
 		.hook_entry = {
 			[NF_INET_LOCAL_IN] = 0,

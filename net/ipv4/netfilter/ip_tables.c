@@ -84,13 +84,21 @@ ip_packet_match(const struct iphdr *ip,
 		int isfrag)
 {
 	unsigned long ret;
-
+/*
+bool=1,      case 1.1: 带反转标记(1)		1^1 返回 0
+		  case 1.2: 不带反转标记(0)	0^1 返回 1
+bool=0,      case 2.1:  带反转标记(1)		1^0 返回 1		
+		  case 2.2:  不带反转标记(0)	0^0 返回 0
+*/
 #define FWINV(bool, invflg) ((bool) ^ !!(ipinfo->invflags & (invflg)))
-
-	if (FWINV((ip->saddr&ipinfo->smsk.s_addr) != ipinfo->src.s_addr,
-		  IPT_INV_SRCIP)
-	    || FWINV((ip->daddr&ipinfo->dmsk.s_addr) != ipinfo->dst.s_addr,
-		     IPT_INV_DSTIP)) {
+/*
+ip不相等则bool = 1 若带反转, 	    -> case 1.1	match
+		  		     不带反转       -> case 1.2  mismatch.
+ip相等则bool = 0      若带反转	    -> case 2.1  mismatch
+				     不带反转       -> case 2.2	match.
+*/
+	if (FWINV((ip->saddr&ipinfo->smsk.s_addr) != ipinfo->src.s_addr,  IPT_INV_SRCIP)
+	    || FWINV((ip->daddr&ipinfo->dmsk.s_addr) != ipinfo->dst.s_addr, IPT_INV_DSTIP)) {
 		dprintf("Source or dest mismatch.\n");
 
 		dprintf("SRC: %pI4. Mask: %pI4. Target: %pI4.%s\n",
@@ -101,22 +109,20 @@ ip_packet_match(const struct iphdr *ip,
 			ipinfo->invflags & IPT_INV_DSTIP ? " (INV)" : "");
 		return false;
 	}
-
+/*
+下面的out interface / in interface/protocol/fragment比较也是类似的...
+*/
 	ret = ifname_compare_aligned(indev, ipinfo->iniface, ipinfo->iniface_mask);
 
 	if (FWINV(ret != 0, IPT_INV_VIA_IN)) {
-		dprintf("VIA in mismatch (%s vs %s).%s\n",
-			indev, ipinfo->iniface,
-			ipinfo->invflags&IPT_INV_VIA_IN ?" (INV)":"");
+		dprintf("VIA in mismatch (%s vs %s).%s\n", indev, ipinfo->iniface, ipinfo->invflags&IPT_INV_VIA_IN ?" (INV)":"");
 		return false;
 	}
 
 	ret = ifname_compare_aligned(outdev, ipinfo->outiface, ipinfo->outiface_mask);
 
 	if (FWINV(ret != 0, IPT_INV_VIA_OUT)) {
-		dprintf("VIA out mismatch (%s vs %s).%s\n",
-			outdev, ipinfo->outiface,
-			ipinfo->invflags&IPT_INV_VIA_OUT ?" (INV)":"");
+		dprintf("VIA out mismatch (%s vs %s).%s\n", outdev, ipinfo->outiface, ipinfo->invflags&IPT_INV_VIA_OUT ?" (INV)":"");
 		return false;
 	}
 
@@ -299,11 +305,11 @@ static void trace_packet(struct sk_buff *skb,
 
 /* Returns one of the generic firewall policies, like NF_ACCEPT. */
 unsigned int
-ipt_do_table(struct sk_buff *skb,
-	     unsigned int hook,
-	     const struct net_device *in,
-	     const struct net_device *out,
-	     struct xt_table *table)
+ipt_do_table(struct sk_buff *skb,		//	--经过防火墙的数据包...
+	     unsigned int hook,					//	--经过防火墙的某个hook点.
+	     const struct net_device *in,			//	--该数据包的进入接口..
+	     const struct net_device *out,			//	--该数据包的出去接口..
+	     struct xt_table *table)				//	-- 表...指定表和hook点..可以确定了一系列的规则(rule 或者是 entry).
 {
 	static const char nulldevname[IFNAMSIZ] __attribute__((aligned(sizeof(long))));
 	const struct iphdr *ip;
@@ -342,73 +348,123 @@ ipt_do_table(struct sk_buff *skb,
 	xt_info_rdlock_bh();
 	private = table->private;
 	table_base = private->entries[smp_processor_id()];
-
+	//获取table中对于某个hook点来说,,它rule的起始地址...
+	//table_base是该table所有rule的起始地址..里面的rule是按不同的hook点进行分类的...
+	//而hook_entry[hook]分别记录各自hook点相对于起始地址的偏移量...
 	e = get_entry(table_base, private->hook_entry[hook]);
 
 	/* For return from builtin chain */
+	/*获取到相应规则链的最后一个规则??
+	对于别人说这个underflow是规则链的最后一个规则的说法我持怀疑态度
+	我反而觉得其与hookentry[]中相对应位置的值是一样的。通过阅读代码，
+	我感觉就是根据其underflow指针获取到规则链的首个ipt_entry，然后在一 个rule的target为NF_REPEAT时，
+	则从该underflow处的ipt_entry开始重 新进行rule规则检查，重新执行一次ipt_do_table而已。
+	*/
 	back = get_entry(table_base, private->underflow[hook]);
 
 	do {
 		IP_NF_ASSERT(e);
 		IP_NF_ASSERT(back);
-		if (ip_packet_match(ip, indev, outdev,
-		    &e->ip, mtpar.fragoff)) {
-			struct ipt_entry_target *t;
+		if (ip_packet_match(ip, indev, outdev, &e->ip, mtpar.fragoff)) {
+		//先对标准的match进行检测...比如说src ip / dst ip / in interface / out inteface...
+		//这些匹配是保存在e->ip里面的...
 
+			struct ipt_entry_target *t;
+			//一旦标准的检测过程通过之后...还要去尝检测扩展match(如果存在的话)....调用函数do_match来检测...
 			if (IPT_MATCH_ITERATE(e, do_match, skb, &mtpar) != 0)
 				goto no_match;
-
+			//来到这里之后...代表该数据包通过了rule的一系列match的匹配...那么现在就需要执行match成功后要做的动作(target)了!!
+			//同时需要注意的是...并不规定说rule是属于标准链或者是自定义链...
+			
+			//递增packet和bytes...
 			ADD_COUNTER(e->counters, ntohs(ip->tot_len), 1);
-
+			//接下去要执行target...这里先获取target结构体....
 			t = ipt_get_target(e);
 			IP_NF_ASSERT(t->u.kernel.target);
 
-#if defined(CONFIG_NETFILTER_XT_TARGET_TRACE) || \
-    defined(CONFIG_NETFILTER_XT_TARGET_TRACE_MODULE)
+#if defined(CONFIG_NETFILTER_XT_TARGET_TRACE) || defined(CONFIG_NETFILTER_XT_TARGET_TRACE_MODULE)
 			/* The packet is traced: log it */
 			if (unlikely(skb->nf_trace))
-				trace_packet(skb, hook, in, out,
-					     table->name, private, e);
+				trace_packet(skb, hook, in, out, table->name, private, e);
 #endif
 			/* Standard target? */
 			if (!t->u.kernel.target->target) {
+				/*
+				如果是标准的target...那么target的字段设置为NULL...
+				这时候就需要根据ipt_standard_target->verdict，因为 ipt_entry_target与ipt_standard_target相比，
+						ipt_standard_target就多了一个verdict，所以他们之间的转换非常容易...
+				case 1 : 如果ipt_standard_target->verdict小于0，说明不会跳转到用户自定义链，如果verdict不为IPT_RETURN. 此时就直接返回 -verdict-1即可
+					     如果verdict为IPT_RETURN..那对于该rule
+					     		case 1.1: 属于内建链(build-in)..跳转到第一条rule去执行.
+					     		case 1.2: 属于自定义链...执行跳转到自定义链的下一条rule.			     	
+				case 2: 如果ipt_standard_target->verdict大于0，说明这是一个需 要跳转到用户自定义链的target.并且verdict的值就是
+					    跳转到自定义链的首条rule的偏移啦.
+					    此时需要设置back和comfrom变量，然后才可以实现case 1.1 和 case 1.2描述的情况...
+				*/
 				int v;
-
+				
 				v = ((struct ipt_standard_target *)t)->verdict;
 				if (v < 0) {
-					/* Pop from stack? */
+					//target的目标不是到自定义链上...
 					if (v != IPT_RETURN) {
+						//不必执行hook函数，而是直接返回...
 						verdict = (unsigned)(-v) - 1;
 						break;
 					}
+					/*
+					前面提到的case 1.1和case 1.2就是这里实现的....
+					对于处于内建链的来说...back就是返回到第一条rule..(back在进入do-while前就初始化好了.)
+					对于处于自定义链的来说..back就是返回到跳转到该自定义链的下一条..(back下面设置..)
+					*/
 					e = back;
-					back = get_entry(table_base,
-							 back->comefrom);
+					back = get_entry(table_base,  back->comefrom);
 					continue;
 				}
-				if (table_base + v != (void *)e + e->next_offset
-				    && !(e->ip.flags & IPT_F_GOTO)) {
+				/*
+				eg:	规则[A-T]..其中C->F, H->K, M->O, Q->T.
+			   built-in    1            2              3          4
+				A
+				B
+				C ---> F
+				D	    G
+				E          H --->  K
+				            I            L
+				            J            M ----> O
+				            		 N		 P
+				            		 		 Q ---> T
+				            		 		 R
+				            		 		 S
+		back      A           D           I                N          R
+			        上面画出了每次执行lrule时候它的back值...假设一直跳转到T上..而back只是一个变量,,一旦设置为R..那前面
+			        的A/D/I/N都会丢失...为了保存起来..就使用到了comfrom变量....
+			        在执行rule T的时候back = R...那么back = get_entry(table_base,  back->comefrom);就可以得到N啦.
+			        那就是说..back保存着4链返回到3链后继续执行的rule...而back->comfrom是3链返回后在2链继续执行的rule.
+			        
+				back保存的就是自定义链返回后执行的下一条rule.
+				back->comfrom的值保存着back所属rule链的返回后下一条rule
+				*/
+				if (table_base + v != (void *)e + e->next_offset && !(e->ip.flags & IPT_F_GOTO)) {
 					/* Save old back ptr in next entry */
-					struct ipt_entry *next
-						= (void *)e + e->next_offset;
-					next->comefrom
-						= (void *)back - table_base;
+					struct ipt_entry *next = (void *)e + e->next_offset;
+					next->comefrom = (void *)back - table_base;
 					/* set back pointer to next entry */
 					back = next;
 				}
-
+				//对于target是跳转到自定义链的rule，它的verdict就是跳转过去的rule的偏移量.
 				e = get_entry(table_base, v);
 			} else {
-				/* Targets which reenter must return
-				   abs. verdicts */
+			/*
+			    当扩展target时，则需要调用t->u.kernel.target->target， 执行扩展的target操作，并返回结果。
+			    当返回的结果为IPT_CONTINUE时，则需要获取下一条规则，继续进行规则检查...
+		        */
+				/* Targets which reenter must return  abs. verdicts */
 				tgpar.target   = t->u.kernel.target;
 				tgpar.targinfo = t->data;
 #ifdef CONFIG_NETFILTER_DEBUG
 				((struct ipt_entry *)table_base)->comefrom
 					= 0xeeeeeeec;
 #endif
-				verdict = t->u.kernel.target->target(skb,
-								     &tgpar);
+				verdict = t->u.kernel.target->target(skb, &tgpar);
 #ifdef CONFIG_NETFILTER_DEBUG
 				if (((struct ipt_entry *)table_base)->comefrom
 				    != 0xeeeeeeec
@@ -585,7 +641,10 @@ check_entry(struct ipt_entry *e, const char *name)
 		duprintf("ip_tables: ip check failed %p %s.\n", e, name);
 		return -EINVAL;
 	}
-
+/*
+检查一下entry是否正确...next_offset就是下一个entry的起点...一个entry的targt_offset加上target的大小..
+是不应该超过下一个entry的起点的.
+*/
 	if (e->target_offset + sizeof(struct ipt_entry_target) >
 	    e->next_offset)
 		return -EINVAL;
@@ -686,6 +745,10 @@ find_check_entry(struct ipt_entry *e, const char *name, unsigned int size,
 	mtpar.entryinfo = &e->ip;
 	mtpar.hook_mask = e->comefrom;
 	mtpar.family    = NFPROTO_IPV4;
+/*
+下面是分别设置match和target...在xt中记录了系统当前注册的match和target..
+匹配的条件就是比较name和revision...找到之后还会去check一下是否正确...
+*/
 	ret = IPT_MATCH_ITERATE(e, find_check_match, &mtpar, &j);
 	if (ret != 0)
 		goto cleanup_matches;
@@ -731,7 +794,7 @@ check_entry_size_and_hooks(struct ipt_entry *e,
 		duprintf("Bad offset %p\n", e);
 		return -EINVAL;
 	}
-
+	//next_offset是一个entry的大小...一个entry至少要有struct ipt_entry + struct ipt_entry_target组成.
 	if (e->next_offset
 	    < sizeof(struct ipt_entry) + sizeof(struct ipt_entry_target)) {
 		duprintf("checking: element %p size %u\n",
@@ -807,6 +870,13 @@ translate_table(const char *name,
 	duprintf("translate_table: size %u\n", newinfo->size);
 	i = 0;
 	/* Walk through entries, checking offsets. */
+/*
+entry0就是entry数组的起点
+size代表数组所占用内存的长度(每个entry的长度是不一样的.)每个entry的长度保存在结构体字段里面,,也就是next_offset
+因此..就可以遍历每个entry了..下面可以认为每个entry调用函数check_entry_size_and_hooks，后面全部是调用该函数的参数.
+作用就是对每个entry检测是否正常..同时设置xt_table_info->hook_entry[x] 和 xt_table_info->underflow[x]表示为entry数组的偏移..
+而xt_table_info->entry指向entry的起点...
+*/
 	ret = IPT_ENTRY_ITERATE(entry0, newinfo->size,
 				check_entry_size_and_hooks,
 				newinfo,
@@ -838,11 +908,20 @@ translate_table(const char *name,
 			return -EINVAL;
 		}
 	}
-
+/*
+调用mark_source_chains链中的规则是否存在检查环路
+*/
 	if (!mark_source_chains(newinfo, valid_hooks, entry0))
 		return -ELOOP;
 
 	/* Finally, each sanity check must pass */
+/*
+遍历链表中的所有ipt_entry，对每一个ipt_entry，执行以下动作
+1、遍历该ipt_entry下的所有match，根据每个match的用户层的match名称，
+  在kernel的xt[af].match链表中查找名称相同的match变量，将地址赋值   给m->u.kernel.match ，当满足合法性检查时，
+  继续操作；若不满足合法性   检查，则会返回失败，并释放创建的struct xt_table_info newinfo，说明   创建ipt_table失败
+2、遍历xt[af].target，查找符合条件的target，并赋值给t->u.kernel.target
+*/
 	i = 0;
 	ret = IPT_ENTRY_ITERATE(entry0, newinfo->size,
 				find_check_entry, name, size, &i);
@@ -956,7 +1035,11 @@ copy_entries_to_user(unsigned int total_size,
 	const struct xt_table_info *private = table->private;
 	int ret = 0;
 	const void *loc_cpu_entry;
-
+//统计每个规则上流过的packet/byte都counters里面...counters在函数内部分配的。。
+//对于SMP来说...是需要统计每个cpu上面流过的啦.
+//每个cpu上面的规则虽然是独立的..但是它们都是一样的..但是流过去的packet和byte就是根据每个CPU而不同..
+//因此拷贝给用户空间..rule只要随便复制一个CPU的..但是统计，就需要把所有CPU的packet和byte都统计起来然后在返回.
+//counters只是辅助作用...最后也是需要被vfree掉的!!
 	counters = alloc_counters(table);
 	if (IS_ERR(counters))
 		return PTR_ERR(counters);
@@ -965,6 +1048,7 @@ copy_entries_to_user(unsigned int total_size,
 	 * This choice is lazy (because current thread is
 	 * allowed to migrate to another cpu)
 	 */
+//拷贝了所有的entry(rule)到用户空间.
 	loc_cpu_entry = private->entries[raw_smp_processor_id()];
 	if (copy_to_user(userptr, loc_cpu_entry, total_size) != 0) {
 		ret = -EFAULT;
@@ -974,10 +1058,11 @@ copy_entries_to_user(unsigned int total_size,
 	/* FIXME: use iterator macros --RR */
 	/* ... then go back and fix counters and names */
 	for (off = 0, num = 0; off < total_size; off += e->next_offset, num++){
+	//上面的for循环用来遍历table里面所有的entry(rule)...
 		unsigned int i;
 		const struct ipt_entry_match *m;
 		const struct ipt_entry_target *t;
-
+	//前面统计的counter，复制给用户空间....
 		e = (struct ipt_entry *)(loc_cpu_entry + off);
 		if (copy_to_user(userptr + off
 				 + offsetof(struct ipt_entry, counters),
@@ -991,7 +1076,13 @@ copy_entries_to_user(unsigned int total_size,
 		     i < e->target_offset;
 		     i += m->u.match_size) {
 			m = (void *)e + i;
-
+	//上面的for结果就是让m指向rule(e)里面每个match结构体啦!!!
+/*
+为什么要这样做呢?结构体里面有区分user.name和kernel.match..我只能猜测，内核不想透露match结构体咋内核的
+地址..它只想返回给用户空间该规则匹配的match名称而已...(user.name和kernel.match在内存地址上是重叠的).
+在内核空间使用kernel.match指向匹配的match..
+下面的target也是相同的道理!!!.
+*/
 			if (copy_to_user(userptr + off + i
 					 + offsetof(struct ipt_entry_match,
 						    u.user.name),
@@ -1103,7 +1194,7 @@ static int get_info(struct net *net, void __user *user, int *len, int compat)
 			 sizeof(struct ipt_getinfo));
 		return -EINVAL;
 	}
-
+	//user的第一个字段存放的就是name..
 	if (copy_from_user(name, user, sizeof(name)) != 0)
 		return -EFAULT;
 
@@ -1245,6 +1336,11 @@ __do_replace(struct net *net, const char *name, unsigned int valid_hooks,
 	IPT_ENTRY_ITERATE(loc_cpu_old_entry, oldinfo->size, cleanup_entry,
 			  NULL);
 	xt_free_table_info(oldinfo);
+/*
+在替换之前..先把之前的packet和byte统计给收集起来..并返回给用户空间...
+在用户空间一般还是会调用SO_SET_ADD_COUNTERS来把统计给增加到替换后的规则集合里面...
+这样对packet和byte的统计才是正确的!!!
+*/
 	if (copy_to_user(counters_ptr, counters,
 			 sizeof(struct xt_counters) * num_counters) != 0)
 		ret = -EFAULT;
@@ -1374,8 +1470,11 @@ do_add_counters(struct net *net, void __user *user, unsigned int len, int compat
 		ret = -EFAULT;
 		goto free;
 	}
-
-	t = xt_find_table_lock(net, AF_INET, name);
+/*
+上面的过程就是,,拷贝struct xt_counters_info到ptmp指向的内存...拷贝num_counters个struct xt_counters到paddc指向的内存.
+这2部分就是用户空间传递到内核空间的数据..
+*/
+	t = xt_find_table_lock(net, AF_INET, name);		//--struct xt_counters_info中有name字段..就是要操作的table.
 	if (!t || IS_ERR(t)) {
 		ret = t ? PTR_ERR(t) : -ENOENT;
 		goto free;
@@ -1395,7 +1494,7 @@ do_add_counters(struct net *net, void __user *user, unsigned int len, int compat
 	xt_info_wrlock(curcpu);
 	IPT_ENTRY_ITERATE(loc_cpu_entry,
 			  private->size,
-			  add_counter_to_entry,
+			  add_counter_to_entry,		//-- 用来增加  packet 和  byte 的数目...
 			  paddc,
 			  &i);
 	xt_info_wrunlock(curcpu);
@@ -2059,7 +2158,8 @@ struct xt_table *ipt_register_table(struct net *net, struct xt_table *table,
 		= { 0, 0, 0, { 0 }, { 0 }, { } };
 	void *loc_cpu_entry;
 	struct xt_table *new_table;
-
+	
+	/*分别申请sizeof（xt_table_info）与repl->size两个内存块。*/
 	newinfo = xt_alloc_table_info(repl->size);
 	if (!newinfo) {
 		ret = -ENOMEM;
@@ -2069,7 +2169,8 @@ struct xt_table *ipt_register_table(struct net *net, struct xt_table *table,
 	/* choose the copy on our node/cpu, but dont care about preemption */
 	loc_cpu_entry = newinfo->entries[raw_smp_processor_id()];
 	memcpy(loc_cpu_entry, repl->entries, repl->size);
-
+	/*translate_table函数将由newinfo所表示的table的各个规则进行边界检查，然后对于newinfo所指的xt_talbe_info结构中的
+	hook_entries和underflows赋予正确的值，最后将表项向其他cpu拷贝*/
 	ret = translate_table(table->name, table->valid_hooks,
 			      newinfo, loc_cpu_entry, repl->size,
 			      repl->num_entries,
@@ -2077,7 +2178,7 @@ struct xt_table *ipt_register_table(struct net *net, struct xt_table *table,
 			      repl->underflow);
 	if (ret != 0)
 		goto out_free;
-
+	//这里才是真正的注册表的地方....前面都是为了构建出struct xt_table_info这个结构体...
 	new_table = xt_register_table(net, table, &bootstrap, newinfo);
 	if (IS_ERR(new_table)) {
 		ret = PTR_ERR(new_table);

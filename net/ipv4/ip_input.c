@@ -378,9 +378,9 @@ static int ip_rcv_finish(struct sk_buff *skb)
 		goto drop;
 
 	rt = skb->rtable;
-	if (rt->rt_type == RTN_MULTICAST)
+	if (rt->rt_type == RTN_MULTICAST)		//¶à²¥.
 		IP_INC_STATS_BH(dev_net(rt->u.dst.dev), IPSTATS_MIB_INMCASTPKTS);
-	else if (rt->rt_type == RTN_BROADCAST)
+	else if (rt->rt_type == RTN_BROADCAST)	//¹ã²¥.
 		IP_INC_STATS_BH(dev_net(rt->u.dst.dev), IPSTATS_MIB_INBCASTPKTS);
 
 	return dst_input(skb);

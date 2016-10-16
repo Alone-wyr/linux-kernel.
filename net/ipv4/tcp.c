@@ -712,12 +712,17 @@ static ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffse
 	long timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
 
 	/* Wait for a connection to finish. */
+/*
+	如果不处于TCPF_ESTABLISHED和TCPF_CLOSE_WAIT..那就等待连接的建立.
+*/
 	if ((1 << sk->sk_state) & ~(TCPF_ESTABLISHED | TCPF_CLOSE_WAIT))
 		if ((err = sk_stream_wait_connect(sk, &timeo)) != 0)
 			goto out_err;
 
 	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
-
+	/*
+	获取当前的发送MSS. 
+	*/  
 	mss_now = tcp_send_mss(sk, &size_goal, flags);
 	copied = 0;
 
@@ -886,8 +891,11 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	mss_now = tcp_send_mss(sk, &size_goal, flags);
 
 	/* Ok commence sending. */
-	iovlen = msg->msg_iovlen;
+	/* 应用层数据块的个数*/  
+	iovlen = msg->msg_iovlen;	
+	/* 应用层数据块数组的地址 */
 	iov = msg->msg_iov;
+	/* 已拷贝到发送队列的字节数 */  
 	copied = 0;
 
 	err = -EPIPE;
@@ -902,7 +910,7 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 
 		while (seglen > 0) {
 			int copy;
-
+			/* 发送队列的最后一个skb */  
 			skb = tcp_write_queue_tail(sk);
 
 			if (!tcp_send_head(sk) ||

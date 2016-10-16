@@ -229,6 +229,8 @@ static int ip_finish_output(struct sk_buff *skb)
 		return dst_output(skb);
 	}
 #endif
+//当长度大于了mtu的时候...且网卡不支持GSO...GSO就是网卡帮忙做ip数据包的分包....这样其实就是一个数据包只走一次协议栈..
+//而如果不支持GSO..那就需要自己分片...这样导致分多少片..则多少遍协议栈...
 	if (skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb))
 		return ip_fragment(skb, ip_finish_output2);
 	else
@@ -296,15 +298,19 @@ int ip_mc_output(struct sk_buff *skb)
 
 int ip_output(struct sk_buff *skb)
 {
+	//dst是路由...每个路由都有一个信息就是出口接口...因此dev就是出口接口设备.
 	struct net_device *dev = skb->dst->dev;
 
 	IP_INC_STATS(dev_net(dev), IPSTATS_MIB_OUTREQUESTS);
-
+	//保存出口接口设备...
 	skb->dev = dev;
+	//报文协议类型为ip..这个应该是供链路层来填充它的头部..ip/arp等.
 	skb->protocol = htons(ETH_P_IP);
 		//这边是iptables的output的 hook点...
 		//需要特别注意它调用的是COND的宏..是有条件来判断是否要将数据包送入到netfilter的..
-		//!(IPCB(skb)->flags & IPSKB_REROUTED)返回1..则需要进入netfilter.比较一个数据包不需要重新路由的情况下.
+		//!(IPCB(skb)->flags & IPSKB_REROUTED)返回1..则需要进入netfilter.
+		//其中一个作用,如果带IPSKB_REROUTED标记的数据包不进入到POST链SNAT操作.
+		//可能还有其他很多作用..!!
 	return NF_HOOK_COND(PF_INET, NF_INET_POST_ROUTING, skb, NULL, dev,
 			    ip_finish_output,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));

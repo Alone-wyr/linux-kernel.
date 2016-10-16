@@ -56,12 +56,19 @@ struct linger {
  */
  
 struct msghdr {
+	//目的地址.
 	void	*	msg_name;	/* Socket name			*/
+	//目的地址长度.
 	int		msg_namelen;	/* Length of name		*/
+	//分散的数据块数组.
 	struct iovec *	msg_iov;	/* Data blocks			*/
+	//分散的数据块数目.
 	__kernel_size_t	msg_iovlen;	/* Number of blocks		*/
+	//控制数据.
 	void 	*	msg_control;	/* Per protocol magic (eg BSD file descriptor passing) */
+	//控制数据长度.
 	__kernel_size_t	msg_controllen;	/* Length of cmsg list */
+	//发送默认为阻塞发送，也可以设置为非阻塞发送。非阻塞标志：O_NONBLOCK、MSG_DONTWAIT	
 	unsigned	msg_flags;
 };
 

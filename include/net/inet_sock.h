@@ -115,7 +115,7 @@ struct inet_sock {
 	__be32			daddr;
 	__be32			rcv_saddr;
 	__be16			dport;
-	__u16			num;
+	__u16			num;		// -- 源端口号.
 	__be32			saddr;
 	__s16			uc_ttl;
 	__u16			cmsg_flags;
@@ -128,6 +128,9 @@ struct inet_sock {
 	__u8			recverr:1,
 				is_icsk:1,
 				freebind:1,
+/*
+setsockopt: IP_HDRINCL选项...可以填充IP数据包..
+*/
 				hdrincl:1,
 				mc_loop:1,
 				transparent:1;

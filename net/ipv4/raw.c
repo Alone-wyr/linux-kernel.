@@ -466,7 +466,10 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	/*
 	 *	Get and verify the address.
 	 */
-
+/*
+确定要发送的对端的IP地址保存到dadr...对于sendto最后的两个参数可能为空..因为它、
+进行过connect函数的调用，设置了同socket通信的对端信息(ip地址和端口)
+*/
 	if (msg->msg_namelen) {
 		struct sockaddr_in *usin = (struct sockaddr_in *)msg->msg_name;
 		err = -EINVAL;
