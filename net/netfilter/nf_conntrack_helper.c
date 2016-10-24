@@ -218,8 +218,7 @@ int nf_conntrack_helper_init(void)
 	int err;
 
 	nf_ct_helper_hsize = 1; /* gets rounded up to use one page */
-	nf_ct_helper_hash = nf_ct_alloc_hashtable(&nf_ct_helper_hsize,
-						  &nf_ct_helper_vmalloc, 0);
+	nf_ct_helper_hash = nf_ct_alloc_hashtable(&nf_ct_helper_hsize,  &nf_ct_helper_vmalloc, 0);
 	if (!nf_ct_helper_hash)
 		return -ENOMEM;
 

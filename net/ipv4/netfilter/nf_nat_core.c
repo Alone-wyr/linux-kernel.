@@ -298,8 +298,7 @@ nf_nat_setup_info(struct nf_conn *ct,
 		}
 	}
 
-	NF_CT_ASSERT(maniptype == IP_NAT_MANIP_SRC ||
-		     maniptype == IP_NAT_MANIP_DST);
+	NF_CT_ASSERT(maniptype == IP_NAT_MANIP_SRC || maniptype == IP_NAT_MANIP_DST);
 	BUG_ON(nf_nat_initialized(ct, maniptype));
 
 	/* What we've got will look like inverse of reply. Normally
@@ -307,8 +306,7 @@ nf_nat_setup_info(struct nf_conn *ct,
 	   manipulations (future optimization: if num_manips == 0,
 	   orig_tp =
 	   conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple) */
-	nf_ct_invert_tuplepr(&curr_tuple,
-			     &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
+	nf_ct_invert_tuplepr(&curr_tuple, &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
 
 	get_unique_tuple(&new_tuple, &curr_tuple, range, ct, maniptype);
 
@@ -335,8 +333,7 @@ nf_nat_setup_info(struct nf_conn *ct,
 		/* nf_conntrack_alter_reply might re-allocate exntension aera */
 		nat = nfct_nat(ct);
 		nat->ct = ct;
-		hlist_add_head_rcu(&nat->bysource,
-				   &net->ipv4.nat_bysource[srchash]);
+		hlist_add_head_rcu(&nat->bysource, &net->ipv4.nat_bysource[srchash]);
 		spin_unlock_bh(&nf_nat_lock);
 	}
 
@@ -386,27 +383,28 @@ manip_pkt(u_int16_t proto,
 }
 
 /* Do packet manipulations according to nf_nat_setup_info. */
-unsigned int nf_nat_packet(struct nf_conn *ct,
-			   enum ip_conntrack_info ctinfo,
-			   unsigned int hooknum,
-			   struct sk_buff *skb)
+/*
+netfilter入口需要SNAT操作，人口的链为prerouting/input.
+netfilter出口需要DNAT操作:  出口的链为postrouting/output.
+*/
+unsigned int nf_nat_packet(struct nf_conn *ct,  enum ip_conntrack_info ctinfo, unsigned int hooknum,  struct sk_buff *skb)
 {
 	enum ip_conntrack_dir dir = CTINFO2DIR(ctinfo);
 	unsigned long statusbit;
 	enum nf_nat_manip_type mtype = HOOK2MANIP(hooknum);
-	//IP_NAT_MANIP_SRC = 0.
-	//如果是POSTROUITNG或者是INPUT的hook点上...那就是返回mtype = 0...
+	
+	//先根据链来确定是snat还是dnat..
 	if (mtype == IP_NAT_MANIP_SRC)
 		statusbit = IPS_SRC_NAT;
 	else
 		statusbit = IPS_DST_NAT;
-
+	
+	//在根据方向来确定是否反转一下...假设发送需要SNAT..那么接受方向的数据就需要DNAT.
 	/* Invert if this is reply dir. */
-	//如果是reply方向..那就颠倒一下..
 	if (dir == IP_CT_DIR_REPLY)
 		statusbit ^= IPS_NAT_MASK;
 
-	/* Non-atomic: these bits don't change. */
+	//ct是一个链接跟踪的结构体...里面记录着该连接收到的数据包是否需要进行SNAT或者DNAT的操作..
 	if (ct->status & statusbit) {
 		struct nf_conntrack_tuple target;
 

@@ -678,8 +678,7 @@ static inline u32 rt_score(struct rtable *rt)
 
 static inline bool rt_caching(const struct net *net)
 {
-	return net->ipv4.current_rt_cache_rebuild_count <=
-		net->ipv4.sysctl_rt_cache_rebuild_count;
+	return net->ipv4.current_rt_cache_rebuild_count <= net->ipv4.sysctl_rt_cache_rebuild_count;
 }
 
 static inline bool compare_hash_inputs(const struct flowi *fl1,
@@ -2201,8 +2200,7 @@ martian_destination:
 	RT_CACHE_STAT_INC(in_martian_dst);
 #ifdef CONFIG_IP_ROUTE_VERBOSE
 	if (IN_DEV_LOG_MARTIANS(in_dev) && net_ratelimit())
-		printk(KERN_WARNING "martian destination %pI4 from %pI4, dev %s\n",
-			&daddr, &saddr, dev->name);
+		printk(KERN_WARNING "martian destination %pI4 from %pI4, dev %s\n", &daddr, &saddr, dev->name);
 #endif
 
 e_hostunreach:
@@ -2225,8 +2223,7 @@ martian_source:
 /*
 路由缓存在内核中组织成hash表.
 */
-int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
-		   u8 tos, struct net_device *dev)
+int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr, u8 tos, struct net_device *dev)
 {
 	struct rtable * rth;
 	unsigned	hash;

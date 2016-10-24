@@ -853,7 +853,7 @@ static int inet_gifconf(struct net_device *dev, char __user *buf, int len)
 out:
 	return done;
 }
-
+//当一个网卡配置了多个IP时，那么kernel选择哪个IP作为源IP来发送数据包呢？对于IPv4来说，这是由函数inet_select_addr决定的。
 __be32 inet_select_addr(const struct net_device *dev, __be32 dst, int scope)
 {
 	__be32 addr = 0;
@@ -861,17 +861,36 @@ __be32 inet_select_addr(const struct net_device *dev, __be32 dst, int scope)
 	struct net *net = dev_net(dev);
 
 	rcu_read_lock();
+	// 得到该device的IP地址配置
 	in_dev = __in_dev_get_rcu(dev);
 	if (!in_dev)
 		goto no_in_dev;
 
 	for_primary_ifa(in_dev) {
+		/*
+		这里对IP地址的scope进行判，其实用的枚举与route的scope相同
+		enum rt_scope_t {
+		    RT_SCOPE_UNIVERSE=0,
+		// User defined values  
+		    RT_SCOPE_SITE=200,
+		    RT_SCOPE_LINK=253,
+		    RT_SCOPE_HOST=254,
+		    RT_SCOPE_NOWHERE=255
+		};
+		那么，scope的值越小，对于IP地址来说，其表示的可用范围也就越大。因此，当ifa->ifa_scope的值大于参数scope时，那么其就不符合要求。
+	ip的scope有待分析....
+		*/
 		if (ifa->ifa_scope > scope)
 			continue;
+		/*
+         		1. 当dst目的地址为0时，那么该地址就可以直接作为备选..
+         		2. 当dst不为0时，需要地址与dst匹配，即处于同一网络。
+         	*/
 		if (!dst || inet_ifa_match(dst, ifa)) {
 			addr = ifa->ifa_local;
 			break;
 		}
+		/* 将第一个primary地址保存到addr中，作为一个默认候选地址 */
 		if (!addr)
 			addr = ifa->ifa_local;
 	} endfor_ifa(in_dev);
@@ -880,6 +899,12 @@ no_in_dev:
 
 	if (addr)
 		goto out;
+	/*
+		 找到了可以使用的地址。
+		 从上面可以看出，这里有两种成功找到的情况
+		 1. 真正找到了匹配的地址
+		 2. 如没有匹配的地址，那么就使用符合scope要求的第一个primary 地址
+	*/
 
 	/* Not loopback addresses on loopback should be preferred
 	   in this case. It is importnat that lo is the first interface

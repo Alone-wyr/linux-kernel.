@@ -50,14 +50,14 @@ redirect_tg(struct sk_buff *skb, const struct xt_target_param *par)
 	const struct nf_nat_multi_range_compat *mr = par->targinfo;
 	struct nf_nat_range newrange;
 
-	NF_CT_ASSERT(par->hooknum == NF_INET_PRE_ROUTING ||
-		     par->hooknum == NF_INET_LOCAL_OUT);
+	NF_CT_ASSERT(par->hooknum == NF_INET_PRE_ROUTING || par->hooknum == NF_INET_LOCAL_OUT);
 
 	ct = nf_ct_get(skb, &ctinfo);
 	NF_CT_ASSERT(ct && (ctinfo == IP_CT_NEW || ctinfo == IP_CT_RELATED));
 
 	/* Local packets: make them go to loopback */
 	if (par->hooknum == NF_INET_LOCAL_OUT)
+		//如果是在output的hook点上添加REDIRECT的rule..那就设置新的目的地址为127.0.0.1
 		newdst = htonl(0x7F000001);
 	else {
 		struct in_device *indev;

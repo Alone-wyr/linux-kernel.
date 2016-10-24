@@ -173,8 +173,7 @@ static inline bool __nf_ct_tuple_dst_equal(const struct nf_conntrack_tuple *t1,
 static inline bool nf_ct_tuple_equal(const struct nf_conntrack_tuple *t1,
 				     const struct nf_conntrack_tuple *t2)
 {
-	return __nf_ct_tuple_src_equal(t1, t2) &&
-	       __nf_ct_tuple_dst_equal(t1, t2);
+	return __nf_ct_tuple_src_equal(t1, t2) && __nf_ct_tuple_dst_equal(t1, t2);
 }
 
 static inline bool

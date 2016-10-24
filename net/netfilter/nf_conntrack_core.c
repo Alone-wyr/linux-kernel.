@@ -160,8 +160,10 @@ nf_ct_invert_tuple(struct nf_conntrack_tuple *inverse,
 }
 EXPORT_SYMBOL_GPL(nf_ct_invert_tuple);
 
-static void
-clean_from_lists(struct nf_conn *ct)
+/*
+从
+*/
+static void clean_from_lists(struct nf_conn *ct)
 {
 	pr_debug("clean_from_lists(%p)\n", ct);
 	hlist_nulls_del_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode);
@@ -218,7 +220,10 @@ destroy_conntrack(struct nf_conntrack *nfct)
 	pr_debug("destroy_conntrack: returning ct=%p to slab\n", ct);
 	nf_conntrack_free(ct);
 }
-
+/*
+一个链接跟踪的连接..会设定一个超时处理..当一定时间内没有数据发送或接受...
+它就会把删除掉..
+*/
 static void death_by_timeout(unsigned long ul_conntrack)
 {
 	struct nf_conn *ct = (void *)ul_conntrack;
@@ -316,10 +321,8 @@ static void __nf_conntrack_hash_insert(struct nf_conn *ct,
 {
 	struct net *net = nf_ct_net(ct);
 
-	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode,
-			   &net->ct.hash[hash]);
-	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_REPLY].hnnode,
-			   &net->ct.hash[repl_hash]);
+	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode, &net->ct.hash[hash]);
+	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_REPLY].hnnode, &net->ct.hash[repl_hash]);
 }
 
 void nf_conntrack_hash_insert(struct nf_conn *ct)
@@ -352,6 +355,7 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	   ICMP/TCP RST packets in other direction.  Actual packet
 	   which created connection will be IP_CT_NEW or for an
 	   expected connection, IP_CT_RELATED. */
+	   //确认这个函数只会在数据包是original方向...
 	if (CTINFO2DIR(ctinfo) != IP_CT_DIR_ORIGINAL)
 		return NF_ACCEPT;
 
@@ -374,24 +378,26 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	   NAT could have grabbed it without realizing, since we're
 	   not in the hash.  If there is, we lost race. */
 	hlist_nulls_for_each_entry(h, n, &net->ct.hash[hash], hnnode)
-		if (nf_ct_tuple_equal(&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple,
-				      &h->tuple))
+		if (nf_ct_tuple_equal(&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple,  &h->tuple))
 			goto out;
 	hlist_nulls_for_each_entry(h, n, &net->ct.hash[repl_hash], hnnode)
-		if (nf_ct_tuple_equal(&ct->tuplehash[IP_CT_DIR_REPLY].tuple,
-				      &h->tuple))
+		if (nf_ct_tuple_equal(&ct->tuplehash[IP_CT_DIR_REPLY].tuple, &h->tuple))
 			goto out;
-
+	//可以看到从unconfirmed链表上remove掉的条件就是....在original和reply方向上都没有该连接的tuple..
 	/* Remove from unconfirmed list */
 	hlist_nulls_del_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode);
-
+	//现在把orignal / reply的tuple添加到hash的bucket上.
 	__nf_conntrack_hash_insert(ct, hash, repl_hash);
 	/* Timer relative to confirmation time, not original
 	   setting time, otherwise we'd get timer wrap in
 	   weird delay cases. */
 	ct->timeout.expires += jiffies;
+	//启动定时器....在一定的时间内该连接没有数据流导致超时就会释放掉该连接的链接跟踪相关的数据结构.
+	//可以猜测在接收到数据包和发送数据包的时候都应该刷新该定时器..!!!!
+	//nf_conntrack_in函数的l4->packet会刷新一下定时器!
 	add_timer(&ct->timeout);
 	atomic_inc(&ct->ct_general.use);
+	//设置为已经confirmed了.
 	set_bit(IPS_CONFIRMED_BIT, &ct->status);
 	NF_CT_STAT_INC(net, insert);
 	spin_unlock_bh(&nf_conntrack_lock);
@@ -399,12 +405,10 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	if (help && help->helper)
 		nf_conntrack_event_cache(IPCT_HELPER, ct);
 #ifdef CONFIG_NF_NAT_NEEDED
-	if (test_bit(IPS_SRC_NAT_DONE_BIT, &ct->status) ||
-	    test_bit(IPS_DST_NAT_DONE_BIT, &ct->status))
+	if (test_bit(IPS_SRC_NAT_DONE_BIT, &ct->status) || test_bit(IPS_DST_NAT_DONE_BIT, &ct->status))
 		nf_conntrack_event_cache(IPCT_NATINFO, ct);
 #endif
-	nf_conntrack_event_cache(master_ct(ct) ?
-				 IPCT_RELATED : IPCT_NEW, ct);
+	nf_conntrack_event_cache(master_ct(ct) ?  IPCT_RELATED : IPCT_NEW, ct);
 	return NF_ACCEPT;
 
 out:
@@ -495,16 +499,14 @@ struct nf_conn *nf_conntrack_alloc(struct net *net,
 	struct nf_conn *ct;
 
 	if (unlikely(!nf_conntrack_hash_rnd_initted)) {
-		get_random_bytes(&nf_conntrack_hash_rnd,
-				sizeof(nf_conntrack_hash_rnd));
+		get_random_bytes(&nf_conntrack_hash_rnd, sizeof(nf_conntrack_hash_rnd));
 		nf_conntrack_hash_rnd_initted = 1;
 	}
 
 	/* We don't want any race condition at early drop stage */
 	atomic_inc(&net->ct.count);
 
-	if (nf_conntrack_max &&
-	    unlikely(atomic_read(&net->ct.count) > nf_conntrack_max)) {
+	if (nf_conntrack_max && unlikely(atomic_read(&net->ct.count) > nf_conntrack_max)) {
 		unsigned int hash = hash_conntrack(orig);
 		if (!early_drop(net, hash)) {
 			atomic_dec(&net->ct.count);
@@ -561,12 +563,15 @@ init_conntrack(struct net *net,
 	struct nf_conn_help *help;
 	struct nf_conntrack_tuple repl_tuple;
 	struct nf_conntrack_expect *exp;
-
+	/* 根据tuple制作一个repl_tuple。主要是调用L3和L4的invert_tuple方法 */  
 	if (!nf_ct_invert_tuple(&repl_tuple, tuple, l3proto, l4proto)) {
 		pr_debug("Can't invert tuple.\n");
 		return NULL;
 	}
-
+	/*
+		对这个ip_conntrack{}对象做一番必要的初始化后，其中还包括，将我们计算出来的tuple和其反向tuple的地址赋给连接跟踪
+		ip_conntrack里的tuplehash[IP_CT_DIR_ORIGINAL]和tuplehash[IP_CT_DIR_REPLY].最后初始化一下timeout..(没有生效).
+	*/
 	ct = nf_conntrack_alloc(net, tuple, &repl_tuple, GFP_ATOMIC);
 	if (IS_ERR(ct)) {
 		pr_debug("Can't allocate conntrack.\n");
@@ -609,8 +614,11 @@ init_conntrack(struct net *net,
 	}
 
 	/* Overload tuple linked list to put us in unconfirmed list. */
-	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode,
-		       &net->ct.unconfirmed);
+	/*
+		Netfilter中有一条链表unconfirmed，里面保存了所有目前还没有收到过确认报文的连接跟踪记录，
+		然后我们的ip_conntrack->tuplehash[IP_CT_DIR_ORIGINAL]就会被添加到unconfirmed链表中
+	*/
+	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode, &net->ct.unconfirmed);
 
 	spin_unlock_bh(&nf_conntrack_lock);
 
@@ -619,7 +627,9 @@ init_conntrack(struct net *net,
 			exp->expectfn(ct, exp);
 		nf_ct_expect_put(exp);
 	}
-
+	/*
+		把ip_conntrack->tuplehash[IP_CT_DIR_ORIGINAL]的地址返回。这恰恰是一条连接跟踪记录初始方向链表的地址
+	*/
 	return &ct->tuplehash[IP_CT_DIR_ORIGINAL];
 }
 
@@ -638,10 +648,8 @@ resolve_normal_ct(struct net *net,
 	struct nf_conntrack_tuple tuple;
 	struct nf_conntrack_tuple_hash *h;
 	struct nf_conn *ct;
-
-	if (!nf_ct_get_tuple(skb, skb_network_offset(skb),
-			     dataoff, l3num, protonum, &tuple, l3proto,
-			     l4proto)) {
+	//根据l3proto->pkt_to_tuple和l4proto->pkt_to_tuple来初始化tuple.
+	if (!nf_ct_get_tuple(skb, skb_network_offset(skb), dataoff, l3num, protonum, &tuple, l3proto,  l4proto)) {
 		pr_debug("resolve_normal_ct: Can't get tuple\n");
 		return NULL;
 	}
@@ -658,11 +666,18 @@ resolve_normal_ct(struct net *net,
 	ct = nf_ct_tuplehash_to_ctrack(h);
 
 	/* It exists; we have (non-exclusive) reference. */
+	 /* 修改数据包的ct状态。 */  
 	if (NF_CT_DIRECTION(h) == IP_CT_DIR_REPLY) {
+		/* 如果这个tuple是reply方向的 */  
 		*ctinfo = IP_CT_ESTABLISHED + IP_CT_IS_REPLY;
 		/* Please set reply bit if this packet OK */
 		*set_reply = 1;
 	} else {
+		/*
+			对于新的连接,它设置为IP_CT_NEW..当有数据回复的时候..就成了上面的IP_CT_ESTABLISHED + IP_CT_IS_REPLY.
+			同时如果有返回.status就会设置IPS_SEEN_REPLY_BIT....调用该函数的外面可以看到!
+			因此当有数据在发送过去的时候...就会设置为IP_CT_ESTABLISHED.!
+		*/
 		/* Once we've had two way comms, always ESTABLISHED. */
 		if (test_bit(IPS_SEEN_REPLY_BIT, &ct->status)) {
 			pr_debug("nf_conntrack_in: normal packet for %p\n", ct);
@@ -681,9 +696,28 @@ resolve_normal_ct(struct net *net,
 	skb->nfctinfo = *ctinfo;
 	return ct;
 }
+/*
+几个类型处理:
+1.当这是一个新的数据流的第一个数据包时，则会根据该数据包的五元组信息
+   创建一个新的连接跟踪项，并初始化该连接跟踪项的tuple_hash、helper的值，最后
+   将该连接跟踪项的原始方向的tuple_hash添加到unconfirmed链表中，且该连接不是期望连接
+2.当这是一个新的数据流的第一个数据包时，则会根据该数据包的五元组信息
+   创建一个新的连接跟踪项，并初始化该连接跟踪项的tuple_hash、helper的值，最后
+   将该连接跟踪项的原始方向的tuple_hash添加到unconfirmed链表中，且该连接是期望连接
+3. 当该数据包是原始方向的非第一个数据包，但当该数据包进入连接跟踪模块时，连接跟踪模块还没有收到reply方向的数据包
+4.当该数据包是原始方向的非第一个数据包， 且到改数据包进入连接跟踪模块时，连接跟踪 模块已经接收到reply方向的数据包
+5.当该数据包是reply方向的数据包。
 
-unsigned int
-nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
+当是第一类数据包时，则创建一个新的连接跟踪项，并作相应的初始化工作，且
+将数据包的nfctinfo设置为IP_CT_NEW；
+当是第二类数据包时，则创建一个新的连接跟踪项，并作相应的初始化工作，且
+将数据包的nfctinfo设置为IP_CT_RELATED；
+当时第三类数据包时，将数据包的nfctinfo设置为IP_CT_NEW；
+当是第四种数据包时，将数据包的nfctinfo设置为IP_CT_ESTABLISHED；
+当时第五种状态时，将数据包的的nfctinfo设置为IP_CT_ESTABLISHED+IP_CT_IS_REPLY；
+
+*/
+unsigned int nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 		struct sk_buff *skb)
 {
 	struct nf_conn *ct;
@@ -703,8 +737,8 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 
 	/* rcu_read_lock()ed by nf_hook_slow */
 	l3proto = __nf_ct_l3proto_find(pf);
-	ret = l3proto->get_l4proto(skb, skb_network_offset(skb),
-				   &dataoff, &protonum);
+	/* 获取skb->data中L4层(TCP, UDP, etc)首部指针和协议类型，赋值给dataoff和protonum */  
+	ret = l3proto->get_l4proto(skb, skb_network_offset(skb), &dataoff, &protonum);
 	if (ret <= 0) {
 		pr_debug("not prepared to track yet or error occured\n");
 		NF_CT_STAT_INC_ATOMIC(net, error);
@@ -725,9 +759,8 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 			return -ret;
 		}
 	}
-
-	ct = resolve_normal_ct(net, skb, dataoff, pf, protonum,
-			       l3proto, l4proto, &set_reply, &ctinfo);
+	//根据L3和L4的特定信息..来查找属于这个数据包的strcut nf_conn !!!
+	ct = resolve_normal_ct(net, skb, dataoff, pf, protonum,  l3proto, l4proto, &set_reply, &ctinfo);
 	if (!ct) {
 		/* Not valid part of a connection */
 		NF_CT_STAT_INC_ATOMIC(net, invalid);
@@ -739,9 +772,9 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 		NF_CT_STAT_INC_ATOMIC(net, drop);
 		return NF_DROP;
 	}
-
+	/* 这时skb应该已经指向一个连接了。 */
 	NF_CT_ASSERT(skb->nfct);
-
+	//对于icmp就是刷新一下定时器..!!!不仅仅是icmp..对于所有的来说都应该刷新一下定时器!!!
 	ret = l4proto->packet(ct, skb, dataoff, ctinfo, pf, hooknum);
 	if (ret <= 0) {
 		/* Invalid: inverse of the return code tells
@@ -754,7 +787,12 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 			NF_CT_STAT_INC_ATOMIC(net, drop);
 		return -ret;
 	}
-
+	
+	/* 如果set_reply=1，即这是reply方向的tuple，就设置ct->status = IPS_SEEN_REPLY_BIT*/ 
+	/*
+	IPS_SEEN_REPLY_BIT位原来的值为0，则会调用nf_conntrack_event_cache设置事件通知为IPCT_STATUS，在ipv4_confirm函数里，会调用函数nf_ct_deliver_cached_events
+	通过通知链的回调函数，将需要更新的status通过netlink机制发送给nfnetlink模块，由其再执行更新状态操作.
+	*/
 	if (set_reply && !test_and_set_bit(IPS_SEEN_REPLY_BIT, &ct->status))
 		nf_conntrack_event_cache(IPCT_STATUS, ct);
 
@@ -770,8 +808,7 @@ bool nf_ct_invert_tuplepr(struct nf_conntrack_tuple *inverse,
 	rcu_read_lock();
 	ret = nf_ct_invert_tuple(inverse, orig,
 				 __nf_ct_l3proto_find(orig->src.l3num),
-				 __nf_ct_l4proto_find(orig->src.l3num,
-						      orig->dst.protonum));
+				 __nf_ct_l4proto_find(orig->src.l3num, orig->dst.protonum));
 	rcu_read_unlock();
 	return ret;
 }
@@ -1092,8 +1129,7 @@ void *nf_ct_alloc_hashtable(unsigned int *sizep, int *vmalloced, int nulls)
 	BUILD_BUG_ON(sizeof(struct hlist_nulls_head) != sizeof(struct hlist_head));
 	nr_slots = *sizep = roundup(*sizep, PAGE_SIZE / sizeof(struct hlist_nulls_head));
 	sz = nr_slots * sizeof(struct hlist_nulls_head);
-	hash = (void *)__get_free_pages(GFP_KERNEL | __GFP_NOWARN | __GFP_ZERO,
-					get_order(sz));
+	hash = (void *)__get_free_pages(GFP_KERNEL | __GFP_NOWARN | __GFP_ZERO, get_order(sz));
 	if (!hash) {
 		*vmalloced = 1;
 		printk(KERN_WARNING "nf_conntrack: falling back to vmalloc.\n");

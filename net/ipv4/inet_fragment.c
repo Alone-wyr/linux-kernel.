@@ -244,7 +244,10 @@ static struct inet_frag_queue *inet_frag_alloc(struct netns_frags *nf,
 		return NULL;
 
 	f->constructor(q, arg);
+	//可能nf->mem保存着使用的内存大小吧...现在又分配了q->qsize大小..
+	//然后add起来记录当前使用的内存大小...
 	atomic_add(f->qsize, &nf->mem);
+	//设置超时时间..
 	setup_timer(&q->timer, f->frag_expire, (unsigned long)q);
 	spin_lock_init(&q->lock);
 	atomic_set(&q->refcnt, 1);
@@ -264,7 +267,12 @@ static struct inet_frag_queue *inet_frag_create(struct netns_frags *nf,
 
 	return inet_frag_intern(nf, q, f, arg);
 }
-
+/*
+传递进来的hash值是根据skb包含的一些特定信息,,比如id/saddr/daddr/protocol..
+然后根据该hash值可以确定hash数组里面的一项..f->hash[hash]...而这一项链接在后面的是结构体.struct inet_frag_queue
+每个该结构体维持一个连接....因为还需要一个match函数来确定该分片是不是属于该连接的....
+如果有找到那就返回struct inet_frag_queue...否则会创建一个新的struct inet_frag_queue..同时也是需要添加到hash数组里面去咯!!!
+*/
 struct inet_frag_queue *inet_frag_find(struct netns_frags *nf,
 		struct inet_frags *f, void *key, unsigned int hash)
 	__releases(&f->lock)

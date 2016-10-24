@@ -114,8 +114,7 @@ static inline void inet_proto_csum_replace2(__sum16 *sum, struct sk_buff *skb,
 					    __be16 from, __be16 to,
 					    int pseudohdr)
 {
-	inet_proto_csum_replace4(sum, skb, (__force __be32)from,
-				 (__force __be32)to, pseudohdr);
+	inet_proto_csum_replace4(sum, skb, (__force __be32)from,  (__force __be32)to, pseudohdr);
 }
 
 #endif

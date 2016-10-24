@@ -577,18 +577,21 @@ int ip_defrag(struct sk_buff *skb, u32 user)
 	IP_INC_STATS_BH(net, IPSTATS_MIB_REASMREQDS);
 
 	/* Start by cleaning up the memory. */
+	// 检查已经分配的碎片内存是否超过所设置的上限
 	if (atomic_read(&net->ipv4.frags.mem) > net->ipv4.frags.high_thresh)
 		ip_evictor(net);
 
 	/* Lookup (or create) queue header */
+	//// 根据IP头信息查找队列节点
 	if ((qp = ip_find(net, ip_hdr(skb), user)) != NULL) {
 		int ret;
 
 		spin_lock(&qp->q.lock);
-
+		//如果满足重组条件，对数据包进行重组，返回重组后的数据包
 		ret = ip_frag_queue(qp, skb);
 
 		spin_unlock(&qp->q.lock);
+		// 如果队列节点使用数为0，释放队列节点
 		ipq_put(qp);
 		return ret;
 	}

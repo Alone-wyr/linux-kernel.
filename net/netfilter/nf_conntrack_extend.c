@@ -169,8 +169,7 @@ int nf_ct_extend_register(struct nf_ct_ext_type *type)
 
 	/* This ensures that nf_ct_ext_create() can allocate enough area
 	   before updating alloc_size */
-	type->alloc_size = ALIGN(sizeof(struct nf_ct_ext), type->align)
-			   + type->len;
+	type->alloc_size = ALIGN(sizeof(struct nf_ct_ext), type->align)  + type->len;
 	rcu_assign_pointer(nf_ct_ext_types[type->id], type);
 	update_alloc_size(type);
 out:

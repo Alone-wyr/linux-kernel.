@@ -220,23 +220,16 @@ static int nf_ct_l4proto_register_sysctl(struct nf_conntrack_l4proto *l4proto)
 
 #ifdef CONFIG_SYSCTL
 	if (l4proto->ctl_table != NULL) {
-		err = nf_ct_register_sysctl(l4proto->ctl_table_header,
-					    nf_net_netfilter_sysctl_path,
-					    l4proto->ctl_table,
-					    l4proto->ctl_table_users);
+		err = nf_ct_register_sysctl(l4proto->ctl_table_header,  nf_net_netfilter_sysctl_path,  l4proto->ctl_table,  l4proto->ctl_table_users);
 		if (err < 0)
 			goto out;
 	}
 #ifdef CONFIG_NF_CONNTRACK_PROC_COMPAT
 	if (l4proto->ctl_compat_table != NULL) {
-		err = nf_ct_register_sysctl(&l4proto->ctl_compat_table_header,
-					    nf_net_ipv4_netfilter_sysctl_path,
-					    l4proto->ctl_compat_table, NULL);
+		err = nf_ct_register_sysctl(&l4proto->ctl_compat_table_header,  nf_net_ipv4_netfilter_sysctl_path,  l4proto->ctl_compat_table, NULL);
 		if (err == 0)
 			goto out;
-		nf_ct_unregister_sysctl(l4proto->ctl_table_header,
-					l4proto->ctl_table,
-					l4proto->ctl_table_users);
+		nf_ct_unregister_sysctl(l4proto->ctl_table_header, l4proto->ctl_table, l4proto->ctl_table_users);
 	}
 #endif /* CONFIG_NF_CONNTRACK_PROC_COMPAT */
 out:
@@ -348,8 +341,7 @@ int nf_conntrack_proto_init(void)
 		return err;
 
 	for (i = 0; i < AF_MAX; i++)
-		rcu_assign_pointer(nf_ct_l3protos[i],
-				   &nf_conntrack_l3proto_generic);
+		rcu_assign_pointer(nf_ct_l3protos[i], &nf_conntrack_l3proto_generic);
 	return 0;
 }
 

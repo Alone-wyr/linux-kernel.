@@ -51,8 +51,7 @@ int br_dev_queue_push_xmit(struct sk_buff *skb)
 
 int br_forward_finish(struct sk_buff *skb)
 {
-	return NF_HOOK(PF_BRIDGE, NF_BR_POST_ROUTING, skb, NULL, skb->dev,
-		       br_dev_queue_push_xmit);
+	return NF_HOOK(PF_BRIDGE, NF_BR_POST_ROUTING, skb, NULL, skb->dev, br_dev_queue_push_xmit);
 
 }
 
@@ -76,8 +75,7 @@ static void __br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
 	skb->dev = to->dev;
 	skb_forward_csum(skb);
 
-	NF_HOOK(PF_BRIDGE, NF_BR_FORWARD, skb, indev, skb->dev,
-			br_forward_finish);
+	NF_HOOK(PF_BRIDGE, NF_BR_FORWARD, skb, indev, skb->dev, br_forward_finish);
 }
 
 /* called with rcu_read_lock */
@@ -94,6 +92,9 @@ void br_deliver(const struct net_bridge_port *to, struct sk_buff *skb)
 /* called with rcu_read_lock */
 void br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
 {
+//一开始要确定是否需要转发..首先是出去的接口不应该就是收到数据的接口..
+//如果是相同接口..那就不需要转发了..因为接受数据包的主机和发送的主句在同一个LAN下.
+//其次还需要判断是不是网桥端口的状态是不是为BR_STATE_FORWARDING
 	if (should_deliver(to, skb)) {
 		__br_forward(to, skb);
 		return;

@@ -285,8 +285,7 @@ int ip_local_deliver(struct sk_buff *skb)
 			return 0;
 	}
 	//这边netfilter处理的是input 这个hook点咯...
-	return NF_HOOK(PF_INET, NF_INET_LOCAL_IN, skb, skb->dev, NULL,
-		       ip_local_deliver_finish);
+	return NF_HOOK(PF_INET, NF_INET_LOCAL_IN, skb, skb->dev, NULL, ip_local_deliver_finish);
 }
 
 static inline int ip_rcv_options(struct sk_buff *skb)
@@ -350,8 +349,7 @@ static int ip_rcv_finish(struct sk_buff *skb)
 	 *	how the packet travels inside Linux networking.
 	 */
 	if (skb->dst == NULL) {
-		int err = ip_route_input(skb, iph->daddr, iph->saddr, iph->tos,
-					 skb->dev);
+		int err = ip_route_input(skb, iph->daddr, iph->saddr, iph->tos, skb->dev);
 		if (unlikely(err)) {
 			if (err == -EHOSTUNREACH)
 				IP_INC_STATS_BH(dev_net(skb->dev),
@@ -466,8 +464,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	//skb描述为数据包的数据和相关层的headers....dev为入口的接口...NULL为出口的设备...
 	//ip_recv_finish为hook点的函数处理完后要调用的函数....那确定了数据包达到netfilter后.
 	//是由netfilter直接处理掉..还是继续由网络栈的下一个层来处理(此时调用ip_recv_finish来转交给下一层).
-	return NF_HOOK(PF_INET, NF_INET_PRE_ROUTING, skb, dev, NULL,
-		       ip_rcv_finish);
+	return NF_HOOK(PF_INET, NF_INET_PRE_ROUTING, skb, dev, NULL, ip_rcv_finish);
 
 inhdr_error:
 	IP_INC_STATS_BH(dev_net(dev), IPSTATS_MIB_INHDRERRORS);

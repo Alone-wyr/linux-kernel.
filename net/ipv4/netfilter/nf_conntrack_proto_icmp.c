@@ -87,6 +87,7 @@ static int icmp_packet(struct nf_conn *ct,
 	   means this will only run once even if count hits zero twice
 	   (theoretically possible with SMP) */
 	if (CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY) {
+		//如果把count递减到0...那就会调用nf_cy_kill_acct函数..!!!
 		if (atomic_dec_and_test(&ct->proto.icmp.count))
 			nf_ct_kill_acct(ct, ctinfo, skb);
 	} else {
@@ -109,8 +110,7 @@ static bool icmp_new(struct nf_conn *ct, const struct sk_buff *skb,
 		[ICMP_ADDRESS] = 1
 	};
 
-	if (ct->tuplehash[0].tuple.dst.u.icmp.type >= sizeof(valid_new)
-	    || !valid_new[ct->tuplehash[0].tuple.dst.u.icmp.type]) {
+	if (ct->tuplehash[0].tuple.dst.u.icmp.type >= sizeof(valid_new) || !valid_new[ct->tuplehash[0].tuple.dst.u.icmp.type]) {
 		/* Can't create a new ICMP `conn' with this. */
 		pr_debug("icmp: can't create new conn with type %u\n",
 			 ct->tuplehash[0].tuple.dst.u.icmp.type);

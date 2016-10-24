@@ -130,8 +130,7 @@ struct nf_conn {
 static inline struct nf_conn *
 nf_ct_tuplehash_to_ctrack(const struct nf_conntrack_tuple_hash *hash)
 {
-	return container_of(hash, struct nf_conn,
-			    tuplehash[hash->tuple.dst.dir]);
+	return container_of(hash, struct nf_conn, tuplehash[hash->tuple.dst.dir]);
 }
 
 static inline u_int16_t nf_ct_l3num(const struct nf_conn *ct)
@@ -216,6 +215,12 @@ extern void __nf_ct_refresh_acct(struct nf_conn *ct,
 				 int do_acct);
 
 /* Refresh conntrack for this many jiffies and do accounting */
+/*
+在ipv4_confirm中，对新的连接跟踪项进行确认时，会启动连接跟踪项的超时定时器，以后再收到数据包时，
+会在nf_conntrack_in中调用四层协议的packet函数里调用函数nf_ct_refresh_acct更新定时器的超时处理时间，
+这样的话，只要一个连接跟踪项对应的数据流一直有数据发收发，则连接跟踪项就不会超时，若在一定时间内
+没有再收到数据包，则会超时，从而调用超时处理函数，用于释放该数据连接跟踪项占用的内存。
+*/
 static inline void nf_ct_refresh_acct(struct nf_conn *ct,
 				      enum ip_conntrack_info ctinfo,
 				      const struct sk_buff *skb,

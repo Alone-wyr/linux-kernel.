@@ -411,11 +411,11 @@ bridged_dnat:
 		}
 		dst_hold(&skb->rtable->u.dst);
 	}
-
+	//调用该函数之前会进行skb->dev指向parent的device...
+	//因此skb->dev 就是br0...现在是还原回去为eth1
 	skb->dev = nf_bridge->physindev;
 	nf_bridge_push_encap_header(skb);
-	NF_HOOK_THRESH(PF_BRIDGE, NF_BR_PRE_ROUTING, skb, skb->dev, NULL,
-		       br_handle_frame_finish, 1);
+	NF_HOOK_THRESH(PF_BRIDGE, NF_BR_PRE_ROUTING, skb, skb->dev, NULL, br_handle_frame_finish, 1);
 
 	return 0;
 }
@@ -581,6 +581,7 @@ static unsigned int br_nf_pre_routing(unsigned int hook, struct sk_buff *skb,
 		goto inhdr_error;
 
 	iph = ip_hdr(skb);
+	//小于20 ...或者不是ipv4.
 	if (iph->ihl < 5 || iph->version != 4)
 		goto inhdr_error;
 
@@ -600,12 +601,25 @@ static unsigned int br_nf_pre_routing(unsigned int hook, struct sk_buff *skb,
 	nf_bridge_put(skb->nf_bridge);
 	if (!nf_bridge_alloc(skb))
 		return NF_DROP;
+	/*
+	对一个接口设置桥接...通过下面的片段可以获取到桥接的端口...
+	struct net_bridge_port *port;
+	port = rcu_dereference(skb->dev->br_port);
+	而port->br->dev 就是该接口的parent...
+	比如说:
+	Brctl addbr br0 (建立一个网桥br0, 同时在Linux内核里面创建虚拟网卡br0)
+	Brctl addif br0 eth1
+	Brctl addif br0 eth2
+	Brctl addif br0 eth3
+	那么eth1/eth2/eth3的parent接口就是br0 !!!
+	下面函数就是改变skb->dev...数据包是从eth1进入到的..那么会设置为parent，也就是br0进入的!!
+	同时保存原来的接口(eth1)到skb->nf_bridge->physindev
+	*/
 	if (!setup_pre_routing(skb))
 		return NF_DROP;
 	store_orig_dstaddr(skb);
 
-	NF_HOOK(PF_INET, NF_INET_PRE_ROUTING, skb, skb->dev, NULL,
-		br_nf_pre_routing_finish);
+	NF_HOOK(PF_INET, NF_INET_PRE_ROUTING, skb, skb->dev, NULL, br_nf_pre_routing_finish);
 
 	return NF_STOLEN;
 

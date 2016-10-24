@@ -79,8 +79,7 @@ ipt_pre_routing_hook(unsigned int hook,
 		     const struct net_device *out,
 		     int (*okfn)(struct sk_buff *))
 {
-	return ipt_do_table(skb, hook, in, out,
-			    dev_net(in)->ipv4.iptable_mangle);
+	return ipt_do_table(skb, hook, in, out,  dev_net(in)->ipv4.iptable_mangle);
 }
 
 static unsigned int
@@ -90,8 +89,7 @@ ipt_post_routing_hook(unsigned int hook,
 		      const struct net_device *out,
 		      int (*okfn)(struct sk_buff *))
 {
-	return ipt_do_table(skb, hook, in, out,
-			    dev_net(out)->ipv4.iptable_mangle);
+	return ipt_do_table(skb, hook, in, out,  dev_net(out)->ipv4.iptable_mangle);
 }
 
 static unsigned int

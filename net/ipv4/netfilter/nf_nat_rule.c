@@ -157,6 +157,11 @@ int nf_nat_rule_find(struct sk_buff *skb,
 	ret = ipt_do_table(skb, hooknum, in, out, net->ipv4.nat_table);
 
 	if (ret == NF_ACCEPT) {
+		//在prerouting或者output链上(netfiler的入口)..没有进行dst nat的match然后修改dst ip..
+		//那就会执行alloc_null_binding函数...
+		//比如说一个新的连接的数据包...它会经过nat表的prerouting链的hook函数nf_nat_in.
+		//然后因为ctinfo为NEW进入到该函数...如果nat表的pretouing链上没有rule来match修改dst ip .
+		//那它最后就会调用alloc_null_binding函数了...
 		if (!nf_nat_initialized(ct, HOOK2MANIP(hooknum)))
 			/* NUL mapping */
 			ret = alloc_null_binding(ct, hooknum);

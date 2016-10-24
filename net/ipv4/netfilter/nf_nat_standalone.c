@@ -116,40 +116,39 @@ nf_nat_fn(unsigned int hooknum,
 	case IP_CT_RELATED:
 	case IP_CT_RELATED+IP_CT_IS_REPLY:
 		if (ip_hdr(skb)->protocol == IPPROTO_ICMP) {
-			if (!nf_nat_icmp_reply_translation(ct, ctinfo,
-							   hooknum, skb))
+			if (!nf_nat_icmp_reply_translation(ct, ctinfo,  hooknum, skb))
 				return NF_DROP;
 			else
 				return NF_ACCEPT;
 		}
 		/* Fall thru... (Only ICMPs can be IP_CT_IS_REPLY) */
 	case IP_CT_NEW:
-
-		/* Seen it before?  This can happen for loopback, retrans,
-		   or local packets.. */
+		/*
+			新建的连接..那么就是NEW...此时需要到nat 表 postrouting链上走一趟...
+			判断是不是需要进行SNAT/DNAT/MASQUERADE处理....
+			需要特别注意!!只有在新的连接上...后续的数据包则直接进行处理..不会在去postrouting上走一趟了..!!!!
+		*/
+		/* Seen it before?  This can happen for loopback, retrans,  or local packets.. */
 		if (!nf_nat_initialized(ct, maniptype)) {
 			unsigned int ret;
-
+			//调用该函数的hook点有 in/out/prerouting/postrouting...
+			//
 			if (hooknum == NF_INET_LOCAL_IN)
 				/* LOCAL_IN hook doesn't have a chain!  */
 				ret = alloc_null_binding(ct, hooknum);
 			else
-				ret = nf_nat_rule_find(skb, hooknum, in, out,
-						       ct);
+				ret = nf_nat_rule_find(skb, hooknum, in, out, ct);
 
 			if (ret != NF_ACCEPT) {
 				return ret;
 			}
 		} else
-			pr_debug("Already setup manip %s for ct %p\n",
-				 maniptype == IP_NAT_MANIP_SRC ? "SRC" : "DST",
-				 ct);
+			pr_debug("Already setup manip %s for ct %p\n",maniptype == IP_NAT_MANIP_SRC ? "SRC" : "DST", ct);
 		break;
 
 	default:
 		/* ESTABLISHED */
-		NF_CT_ASSERT(ctinfo == IP_CT_ESTABLISHED ||
-			     ctinfo == (IP_CT_ESTABLISHED+IP_CT_IS_REPLY));
+		NF_CT_ASSERT(ctinfo == IP_CT_ESTABLISHED || ctinfo == (IP_CT_ESTABLISHED+IP_CT_IS_REPLY));
 	}
 
 	return nf_nat_packet(ct, ctinfo, hooknum, skb);
@@ -188,8 +187,7 @@ nf_nat_out(unsigned int hooknum,
 	unsigned int ret;
 
 	/* root is playing with raw sockets. */
-	if (skb->len < sizeof(struct iphdr) ||
-	    ip_hdrlen(skb) < sizeof(struct iphdr))
+	if (skb->len < sizeof(struct iphdr) || ip_hdrlen(skb) < sizeof(struct iphdr))
 		return NF_ACCEPT;
 
 	ret = nf_nat_fn(hooknum, skb, in, out, okfn);
@@ -246,9 +244,38 @@ nf_nat_local_fn(unsigned int hooknum,
 }
 
 /* We must be after connection tracking and before packet filtering. */
+/*
+nat在4个hook点上起作用...
+prerouting和output是netfilter的入口.
+postrouting和input是netfilter的出口.
+对于入口而言..需要进行的是DNAT的动作.
+对于出口而言..需要进行的是SNAT的动作.
 
+所以对于路由器来说...一个LAN口下的主机发送数据包出来..
+LAN到外网的数据包会在postrouting改变SNAT..(外网IP)..
+外网在LAN的数据包会在prerouting改变DNAT..(LAN口IP).
+
+这种NAT的存在，会对filter影响,,因为对IP地址修改了,可能filter就不match到这个数据包而没有丢弃或接受之类的.
+假设WAN口IP为<1.2.3.4>LAN口ip为<192.168.1.1>.下面一个主机的IP地址为192.168.1.2..但是我们需要过滤掉该主机发送和接受的数据包.
+LAN进WAN出的过程: src:<192.168.1.2> dst:<a.b.c.d>
+	      prerouting      src:<192.168.1.2> dst:<a.b.c.d>  
+	      forward	     src:<192.168.1.2> dst:<a.b.c.d>
+	      postrouting     src:<1.2.3.4>	    dst:<a.b.c.d>
+因此对于postrouting来说，它的优先级应该是要比filter低...否则filter无法match(因为src被修改了).
+
+WAN进LAN出的过程: src:<a.b.c.d> dst:<1.2.3.4>
+	      prerouting     src:<a.b.c.d> dst:<192.168.1.2>
+	      forward	    src:<a.b.c.d> dst:<192.168.1.2>
+	      postrouting    src:<a.b.c.d>  dst:<192.168.1.2>
+因此对于prerouting来说，它的优先级应该是要比filter高...
+
+不过要注意的是...filter表并不作用于prerouting和postrouting链上...因此上面的假设也只是假如可以在prerouting和postrouting链上
+起作用...但是filter表有作用于inout/output上...因此对于input和ouput上的NAT分析也和上面一样.
+
+nf_nat_in/nf_nat_out/nf_nat_local_fn最后都会调用nf_nat_fn.
+*/
 static struct nf_hook_ops nf_nat_ops[] __read_mostly = {
-	/* Before packet filtering, change destination */
+	/* Before packet filtering, change destination */	
 	{
 		.hook		= nf_nat_in,
 		.owner		= THIS_MODULE,

@@ -2101,8 +2101,7 @@ static inline struct sk_buff *handle_bridge(struct sk_buff *skb,
 {
 	struct net_bridge_port *port;
 
-	if (skb->pkt_type == PACKET_LOOPBACK ||
-	    (port = rcu_dereference(skb->dev->br_port)) == NULL)
+	if (skb->pkt_type == PACKET_LOOPBACK ||  (port = rcu_dereference(skb->dev->br_port)) == NULL)
 		return skb;
 
 	if (*pt_prev) {
@@ -2303,8 +2302,7 @@ int netif_receive_skb(struct sk_buff *skb)
 	//如果不是NULL..那就捕获它制定的net device的数据包..
 	//最终就是调用协议的func字段指定的回调函数..
 	//同时也可以看到，它和ptype_base的区别也在它只匹配接口..并不匹配协议..
-		if (ptype->dev == null_or_orig || ptype->dev == skb->dev ||
-		    ptype->dev == orig_dev) {
+		if (ptype->dev == null_or_orig || ptype->dev == skb->dev ||  ptype->dev == orig_dev) {
 		  //这里有些奇怪..对于匹配成功的协议.最后一次匹配成功的都不会执行它的回调函数.
 		  //而有pt_prev指向该协议.
 		  //假设先匹配了A，然后匹配了B.

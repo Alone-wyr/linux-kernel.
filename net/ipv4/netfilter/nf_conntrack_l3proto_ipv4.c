@@ -37,8 +37,10 @@ static bool ipv4_pkt_to_tuple(const struct sk_buff *skb, unsigned int nhoff,
 {
 	const __be32 *ap;
 	__be32 _addrs[2];
-	ap = skb_header_pointer(skb, nhoff + offsetof(struct iphdr, saddr),
-				sizeof(u_int32_t) * 2, _addrs);
+	//就是拷贝源IP地址和目的IP地址啦..!!!
+	//nhoff就是ip头相对于skb->data的偏移...
+	//而 offsetof(struct iphdr, saddr)获取到saddr相当于ip头的偏移...因此它们两个相加就可以得到源IP地址和目的IP地址.
+	ap = skb_header_pointer(skb, nhoff + offsetof(struct iphdr, saddr), sizeof(u_int32_t) * 2, _addrs);
 	if (ap == NULL)
 		return false;
 
@@ -146,8 +148,7 @@ static unsigned int ipv4_conntrack_local(unsigned int hooknum,
 					 int (*okfn)(struct sk_buff *))
 {
 	/* root is playing with raw sockets. */
-	if (skb->len < sizeof(struct iphdr) ||
-	    ip_hdrlen(skb) < sizeof(struct iphdr))
+	if (skb->len < sizeof(struct iphdr) || ip_hdrlen(skb) < sizeof(struct iphdr))
 		return NF_ACCEPT;
 	return nf_conntrack_in(dev_net(out), PF_INET, hooknum, skb);
 }

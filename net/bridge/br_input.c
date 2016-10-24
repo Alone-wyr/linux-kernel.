@@ -27,11 +27,10 @@ static void br_pass_frame_up(struct net_bridge *br, struct sk_buff *skb)
 	brdev->stats.rx_packets++;
 	brdev->stats.rx_bytes += skb->len;
 
-	indev = skb->dev;
-	skb->dev = brdev;
+	indev = skb->dev;	//indev = "eth1"
+	skb->dev = brdev;	//skb->dev="br0"
 
-	NF_HOOK(PF_BRIDGE, NF_BR_LOCAL_IN, skb, indev, NULL,
-		netif_receive_skb);
+	NF_HOOK(PF_BRIDGE, NF_BR_LOCAL_IN, skb, indev, NULL, netif_receive_skb);
 }
 
 /* note: already called with rcu_read_lock (preempt_disabled) */
@@ -65,22 +64,30 @@ int br_handle_frame_finish(struct sk_buff *skb)
 		br->dev->stats.multicast++;
 		skb2 = skb;
 	} else if ((dst = __br_fdb_get(br, dest)) && dst->is_local) {
-		skb2 = skb;
+	/*
+	这里是一个重要的过程...尝试去在转发数据库里面寻找entry...
+	*/
+		skb2 = skb;									
 		/* Do not forward the packet since it's local. */
 		skb = NULL;
 	}
 
 	if (skb2 == skb)
-		skb2 = skb_clone(skb, GFP_ATOMIC);
-
+		skb2 = skb_clone(skb, GFP_ATOMIC);				//执行到这里面..
+/*
+只要skb2不为空...则会调用函数br_pass_frame_up，该函数是把数据包再次调用netif_receive_skb..
+1.网卡处于混杂模式..
+2.数据包指示的MAC地址为多播..
+3.转发数据库找到的entry指明是本地的..
+*/
 	if (skb2)
-		br_pass_frame_up(br, skb2);
+		br_pass_frame_up(br, skb2);	
 
 	if (skb) {
 		if (dst)
-			br_forward(dst->dst, skb);
+			br_forward(dst->dst, skb);	//知道数据包应该转发到哪个接口.!!!
 		else
-			br_flood_forward(br, skb);
+			br_flood_forward(br, skb);	//转发数据库里面找不到出口设备...因为就flood出去...!!!
 	}
 
 out:
@@ -159,8 +166,7 @@ forward:
 		if (!compare_ether_addr(p->br->dev->dev_addr, dest))
 			skb->pkt_type = PACKET_HOST;
 
-		NF_HOOK(PF_BRIDGE, NF_BR_PRE_ROUTING, skb, skb->dev, NULL,
-			br_handle_frame_finish);
+		NF_HOOK(PF_BRIDGE, NF_BR_PRE_ROUTING, skb, skb->dev, NULL, br_handle_frame_finish);
 		break;
 	default:
 drop:

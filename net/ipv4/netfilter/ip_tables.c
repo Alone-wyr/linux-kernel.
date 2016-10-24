@@ -326,7 +326,7 @@ ipt_do_table(struct sk_buff *skb,		//	--经过防火墙的数据包...
 
 	/* Initialization */
 	ip = ip_hdr(skb);
-	//len是值IP数据包长度吗?扣掉首部长度...那就是数据长度了.
+	//len是值IP数据包长度, 扣掉首部长度...那就是数据长度了.
 	datalen = skb->len - ip->ihl * 4;
 	indev = in ? in->name : nulldevname;
 	outdev = out ? out->name : nulldevname;

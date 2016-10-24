@@ -60,6 +60,8 @@ static inline int nf_conntrack_confirm(struct sk_buff *skb)
 	int ret = NF_ACCEPT;
 
 	if (ct && ct != &nf_conntrack_untracked) {
+		//第一个条件就是这个链接跟踪还没有被confirm.
+		//第二个条件是没有dying.(怎样才是dying??)
 		if (!nf_ct_is_confirmed(ct) && !nf_ct_is_dying(ct))
 			ret = __nf_conntrack_confirm(skb);
 		if (likely(ret == NF_ACCEPT))

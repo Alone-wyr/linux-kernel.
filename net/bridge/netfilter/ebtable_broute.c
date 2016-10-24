@@ -54,8 +54,7 @@ static int ebt_broute(struct sk_buff *skb)
 {
 	int ret;
 
-	ret = ebt_do_table(NF_BR_BROUTING, skb, skb->dev, NULL,
-			   dev_net(skb->dev)->xt.broute_table);
+	ret = ebt_do_table(NF_BR_BROUTING, skb, skb->dev, NULL, dev_net(skb->dev)->xt.broute_table);
 	if (ret == NF_DROP)
 		return 1; /* route it */
 	return 0; /* bridge it */

@@ -136,7 +136,11 @@ extern struct in_device	*inetdev_by_index(struct net *, int);
 extern __be32		inet_select_addr(const struct net_device *dev, __be32 dst, int scope);
 extern __be32		inet_confirm_addr(struct in_device *in_dev, __be32 dst, __be32 local, int scope);
 extern struct in_ifaddr *inet_ifa_byprefix(struct in_device *in_dev, __be32 prefix, __be32 mask);
-
+//等同于: IP1&mask == IP2&mask
+//如果属于同一个网段..那么只有主机号是不同的...前面都将相同..那么忽略主机号
+//前面的网号相同的话，进行异或..那么网络号部分应该都为0..接着进行&mask..那就去掉了主机号部分.
+//因为得到的结果如果为0，那就是同一个网络..因此返回返回1..
+//不同就返回0
 static __inline__ int inet_ifa_match(__be32 addr, struct in_ifaddr *ifa)
 {
 	return !((addr^ifa->ifa_address)&ifa->ifa_mask);
