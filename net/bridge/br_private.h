@@ -58,9 +58,12 @@ struct net_bridge_fdb_entry
 	unsigned char			is_static;
 };
 
+//一个网桥端口的定义.......参照网络技术内幕图16-6...
 struct net_bridge_port
 {
+	//指向网桥设备..
 	struct net_bridge		*br;
+	//连接到网桥的NIC..
 	struct net_device		*dev;
 	struct list_head		list;
 

@@ -19,28 +19,33 @@
 struct nf_conntrack_l3proto
 {
 	/* L3 Protocol Family number. ex) PF_INET */
+	/*三层协议号*/
 	u_int16_t l3proto;
 
 	/* Protocol name */
+	/*协议名称*/
 	const char *name;
 
 	/*
 	 * Try to fill in the third arg: nhoff is offset of l3 proto
          * hdr.  Return true if possible.
 	 */
-	bool (*pkt_to_tuple)(const struct sk_buff *skb, unsigned int nhoff,
-			     struct nf_conntrack_tuple *tuple);
+	  /*从一个数据包中抽象出三层协议相关的五元组值*/
+	bool (*pkt_to_tuple)(const struct sk_buff *skb, unsigned int nhoff, struct nf_conntrack_tuple *tuple);
 
 	/*
 	 * Invert the per-proto part of the tuple: ie. turn xmit into reply.
 	 * Some packets can't be inverted: return 0 in that case.
 	 */
-	bool (*invert_tuple)(struct nf_conntrack_tuple *inverse,
-			     const struct nf_conntrack_tuple *orig);
+	 /*
+	 对于一个给定的tuple结构，对其三层相关元组进行取反操作并赋值给
+	 新的tuple变量inverse.
+	 */
+	bool (*invert_tuple)(struct nf_conntrack_tuple *inverse, const struct nf_conntrack_tuple *orig);
 
 	/* Print out the per-protocol part of the tuple. */
-	int (*print_tuple)(struct seq_file *s,
-			   const struct nf_conntrack_tuple *);
+	/*打印一个tuple变量中三层相关的信息*/
+	int (*print_tuple)(struct seq_file *s, const struct nf_conntrack_tuple *);
 
 	/*
 	 * Called before tracking. 

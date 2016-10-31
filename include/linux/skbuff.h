@@ -320,7 +320,10 @@ struct sk_buff {
 	struct sk_buff		*prev;
 
 	struct sock		*sk;
+	//时间戳...一般用来记录接收到数据包的时间。
 	ktime_t			tstamp;
+	//作为接受的数据包..记录入口接口...
+	//作为发送的数据包..记录出口接口...
 	struct net_device	*dev;
 
 	union {
@@ -336,12 +339,22 @@ struct sk_buff {
 	 * want to keep them across layers you have to do a skb_clone()
 	 * first. This is owned by whoever has the skb queued ATM.
 	 */
+	 //控制缓冲区...controlbuffer...
 	char			cb[48];
-
-	unsigned int		len,
-				data_len;
-	__u16			mac_len,
-				hdr_len;
+/*
+len:
+缓冲区的数据区的大小...它是动态变化的...在协议栈往下时候它会递增,
+协议栈往上的时候它会减小,,,它指定的大小是包含协议头的.!
+data_len:
+它指的是片段的数据大小.
+*/
+	unsigned int		len, data_len;
+/*
+mac_len:mac_头的大小.
+hdr_len:ip头的大小??
+*/
+	__u16			mac_len, hdr_len;
+//校验和字段....checksum
 	union {
 		__wsum		csum;
 		struct {
@@ -349,7 +362,12 @@ struct sk_buff {
 			__u16	csum_offset;
 		};
 	};
+//表示正在传输或发送的数据包的qos等级..
 	__u32			priority;
+//ip_summed也是校验和相关..
+//cloned指示该sk_buffer是否被克隆过.
+//pkt_type根据L2的目的地址进行类型划分.PACKET_HOST/PACKET_MULTICAST/PACKET_BROADCAST/PACKET_OTHER.....等
+//
 	__u8			local_df:1,
 				cloned:1,
 				ip_summed:2,
@@ -360,8 +378,9 @@ struct sk_buff {
 				ipvs_property:1,
 				peeked:1,
 				nf_trace:1;
+//记录的是L2头中的协议字段...典型的就是IP/IPV6/ARP..
 	__be16			protocol;
-
+//缓冲区要被删除的时候调用...
 	void			(*destructor)(struct sk_buff *skb);
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct nf_conntrack	*nfct;
@@ -406,9 +425,10 @@ struct sk_buff {
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	sk_buff_data_t		tail;
 	sk_buff_data_t		end;
-	unsigned char		*head,
-				*data;
+	unsigned char		*head, *data;
+//truesize:缓冲区的总大小..包括sk_buffer本身!
 	unsigned int		truesize;
+//引用计数
 	atomic_t		users;
 };
 
@@ -1036,7 +1056,16 @@ static inline int skb_is_nonlinear(const struct sk_buff *skb)
 {
 	return skb->data_len;
 }
+/*
+someone else's tips:
+其中skb->len是数据包长度，在IPv4中就是单个完整IP包的总长，
+但这些数据并不一定都在当前内存页；skb->data_len表示在其他页的数据长度
+（包括本skb在其他页中的数据以及分片skb中的数据），因此skb->len - skb->data_len表示
+在当前页的数据大小。
+如果skb->data_len不为0，表示该IP包的数据分属不同的页，该数据包也就被成为非线性化的，
+函数skb_is_nonlinear()就是通过该参数判断，一般刚进行完碎片重组的skb包就属于此类。
 
+*/
 static inline unsigned int skb_headlen(const struct sk_buff *skb)
 {
 	return skb->len - skb->data_len;
@@ -1749,6 +1778,11 @@ extern struct sk_buff *skb_segment(struct sk_buff *skb, int features);
 static inline void *skb_header_pointer(const struct sk_buff *skb, int offset,
 				       int len, void *buffer)
 {
+/*
+这样skb_header_pointer()函数就好理解了，先判断要处理的数据是否都在当前页面内，
+如果是，则返回可以直接对数据处理，返回所求数据指针，否则用skb_copy_bits()函数进行拷贝，
+下面再来看一下这个函数的实现过程，并不复杂。
+*/
 	int hlen = skb_headlen(skb);
 
 	if (hlen - offset >= len)

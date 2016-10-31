@@ -179,13 +179,14 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	cache = fclone ? skbuff_fclone_cache : skbuff_head_cache;
 
 	/* Get the HEAD */
+	//先分配struct sk_buffer头...从slab上分配咯!!
 	skb = kmem_cache_alloc_node(cache, gfp_mask & ~__GFP_DMA, node);
 	if (!skb)
 		goto out;
-
+	//对分配的缓冲区进行对齐...
 	size = SKB_DATA_ALIGN(size);
-	data = kmalloc_node_track_caller(size + sizeof(struct skb_shared_info),
-			gfp_mask, node);
+	//在对齐后的缓冲区后面还跟着一个结构体struct skb_shared_info...
+	data = kmalloc_node_track_caller(size + sizeof(struct skb_shared_info), gfp_mask, node);
 	if (!data)
 		goto nodata;
 
@@ -618,7 +619,8 @@ EXPORT_SYMBOL_GPL(skb_morph);
  *	If this function is called from an interrupt gfp_mask() must be
  *	%GFP_ATOMIC.
  */
-
+//拷贝struct sk_buffer...不能修改缓冲区的内容..
+//如果要修改缓冲区的内容则是调用函数skb_copy或者是pskb_copy!!..
 struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
 {
 	struct sk_buff *n;
@@ -1279,7 +1281,22 @@ pull_pages:
 EXPORT_SYMBOL(__pskb_pull_tail);
 
 /* Copy some data bits from skb to kernel buffer. */
+/*
+  这些都不是重点，主要的是我在网上看到了这样一些话，便直接把它们拷贝过来吧：
 
+  在2.4中是没有这一函数的，因为2.4的netfilter首先进行碎片包重组，随即进行skb的线性化检查，对非线性skb包进行线性化，因此合法skb包进入后续hook点操作时实际skb->data_len就都是0了，可以直接操作。
+
+  netfilter的碎片重组函数为ip_ct_gather_frags()，在2.4中碎片重组完还进行线性化，而2.6中重组完就直接返回了，并不进行线性化操作，因此以后在使用的时候必须检查要处理的数据是否在内存页面中。
+
+  由于2.6中的碎片重组操作后不进行skb数据包的线性化，因此数据可能存在于不同的内存页面中，对于不在同一页面中的情况不能直接进行数据操作，需要将数据拷贝到一个单独缓冲区后再进行处理。
+
+  关于内核为什么这样做，我没找到标志答案，下面是一个网友的回复，也粘贴过来，有机会的话就慢慢了解了：
+ 
+  非线性化很重要的一点是为了支持网卡芯片的一些功能，这些功能可以大大增加TCP的性能。
+
+  如TSO（tcp segment offload），在sendfile中。 系统只是增加file对应的page cache 的引用数，接着将一个个页面放在SKB中发送，一次可以放接近65535 - TCP头的数据。网卡如E1000，会根据MSS大小切割报文并计算校验后发送。
+
+*/
 int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 {
 	int i, copy;
@@ -1289,6 +1306,7 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 		goto fault;
 
 	/* Copy header. */
+	/*拷贝在本页中的部分*/
 	if ((copy = start - offset) > 0) {
 		if (copy > len)
 			copy = len;
@@ -1298,7 +1316,7 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 		offset += copy;
 		to     += copy;
 	}
-
+	/*拷贝本skb中其他碎片的部分*/
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
 		int end;
 
@@ -1324,7 +1342,7 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 		}
 		start = end;
 	}
-
+	/*拷贝其他碎片skb中的数据部分，对于skb的递归调用*/
 	if (skb_shinfo(skb)->frag_list) {
 		struct sk_buff *list = skb_shinfo(skb)->frag_list;
 
@@ -1337,8 +1355,7 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 			if ((copy = end - offset) > 0) {
 				if (copy > len)
 					copy = len;
-				if (skb_copy_bits(list, offset - start,
-						  to, copy))
+				if (skb_copy_bits(list, offset - start, to, copy))
 					goto fault;
 				if ((len -= copy) == 0)
 					return 0;

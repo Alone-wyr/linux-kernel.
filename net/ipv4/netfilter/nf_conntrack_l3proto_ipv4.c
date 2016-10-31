@@ -377,7 +377,7 @@ static int __init nf_conntrack_l3proto_ipv4_init(void)
 
 	need_conntrack();
 	nf_defrag_ipv4_enable();
-
+	//注册的sockopt...可以让用户控件通过getsockopt/setsocketopt来设置或读取一些信息.
 	ret = nf_register_sockopt(&so_getorigdst);
 	if (ret < 0) {
 		printk(KERN_ERR "Unable to register netfilter socket option\n");
@@ -408,8 +408,7 @@ static int __init nf_conntrack_l3proto_ipv4_init(void)
 		goto cleanup_icmp;
 	}
 
-	ret = nf_register_hooks(ipv4_conntrack_ops,
-				ARRAY_SIZE(ipv4_conntrack_ops));
+	ret = nf_register_hooks(ipv4_conntrack_ops, ARRAY_SIZE(ipv4_conntrack_ops));
 	if (ret < 0) {
 		printk("nf_conntrack_ipv4: can't register hooks.\n");
 		goto cleanup_ipv4;

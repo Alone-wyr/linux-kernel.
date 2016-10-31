@@ -54,48 +54,62 @@ union nf_conntrack_man_proto
 /* The manipulable part of the tuple. */
 struct nf_conntrack_man
 {
+	//L3相关信息.
 	union nf_inet_addr u3;
+	//L4相关信息.
 	union nf_conntrack_man_proto u;
 	/* Layer 3 protocol */
+	/* 三层协议号 */
 	u_int16_t l3num;
 };
 
 /* This contains the information to distinguish a connection. */
 struct nf_conntrack_tuple
 {
+	/*源方向上的三层、四层协议相关的识别信息*/
 	struct nf_conntrack_man src;
 
 	/* These are the parts of the tuple which are fixed. */
+	/* 下面的信息时目的方向的三层、四层协议相关的识别信息*/
 	struct {
 		union nf_inet_addr u3;
 		union {
 			/* Add other protocols here. */
+			/* 当四层协议不是tcp、udp、icmp、stcp时，则使用该成员存储四层协议识别信息*/
 			__be16 all;
 
 			struct {
+				/*对于tcp来说，则通过端口号进行识别*/
 				__be16 port;
 			} tcp;
 			struct {
+				/*对于udp来说，则通过端口号进行识别*/
 				__be16 port;
 			} udp;
 			struct {
+				/*对于 icmp 来说，则需要根据类型与代码号进行判断*/
 				u_int8_t type, code;
 			} icmp;
 			struct {
+				//对于dccp，也是根据端口号进行识别
 				__be16 port;
 			} dccp;
 			struct {
+				//对于sctp，也是根据端口号进行识别
 				__be16 port;
 			} sctp;
 			struct {
+				//对于gre，也是根据key进行识别
 				__be16 key;
 			} gre;
 		} u;
 
 		/* The protocol. */
+		/* 四层协议号 */
 		u_int8_t protonum;
 
 		/* The direction (for tuplehash) */
+		//方向.!!!
 		u_int8_t dir;
 	} dst;
 };

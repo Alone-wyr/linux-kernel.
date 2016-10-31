@@ -571,8 +571,7 @@ static unsigned int br_nf_pre_routing(unsigned int hook, struct sk_buff *skb,
 		return NF_ACCEPT;
 #endif
 
-	if (skb->protocol != htons(ETH_P_IP) && !IS_VLAN_IP(skb) &&
-	    !IS_PPPOE_IP(skb))
+	if (skb->protocol != htons(ETH_P_IP) && !IS_VLAN_IP(skb) && !IS_PPPOE_IP(skb))
 		return NF_ACCEPT;
 
 	nf_bridge_pull_encap_header_rcsum(skb);

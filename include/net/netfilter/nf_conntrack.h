@@ -94,22 +94,37 @@ struct nf_conn_help {
 struct nf_conn {
 	/* Usage count in here is 1 for hash table/destruct timer, 1 per skb,
            plus 1 for any connection(s) we are `master' for */
+    /*连接跟踪的引用计数及指向销毁一个连接跟踪项的函数指针*/
 	struct nf_conntrack ct_general;
 
 	/* XXX should I move this to the tail ? - Y.K */
 	/* These are my tuples; original and reply */
+	/*一个数据连接对应的tuple结构变量，包括数据包的原始发送方向与数据包的
+	应答方向的tuple，也就是唯一确定一条数据连接的五元组信息
+	NAT操作就是通过这个功能起作用
+	*/
 	struct nf_conntrack_tuple_hash tuplehash[IP_CT_DIR_MAX];
 
 	/* Have we seen traffic both ways yet? (bitset) */
+	/*连接跟踪项的状态，包括连接跟踪项的状态以及NAT转换是否设置的状态。
+	数据包连接的状态，是一个比特位图。*/
 	unsigned long status;
 
 	/* If we were expected by an expectation, this will be it */
+	/*该成员指向另外一个ip_conntrack{}。一般用于期望连接场景。
+	即如果当前连接是另外某条连接的期望连接的话，那么该成员就指向那条我们所属的主连接。
+	*/
 	struct nf_conn *master;
 
 	/* Timer function; drops refcnt when it goes off. */
+	/*连接跟踪的超时时间
+	不同协议的每条连接都有默认超时时间，如果在超过了该时间且没有属于某条连接的数据包来
+	刷新该连接跟踪记录，那么会调用这种协议类型提供的超时函数。
+	*/
 	struct timer_list timeout;
 
 #if defined(CONFIG_NF_CONNTRACK_MARK)
+	/*用于防火墙的mark，通过iptables的mark模块，能够实现对数据流打mark的功 能*/
 	u_int32_t mark;
 #endif
 
@@ -118,6 +133,7 @@ struct nf_conn {
 #endif
 
 	/* Storage reserved for other modules: */
+	/*该数据连接跟踪项所关联的四层协议相关数据结构*/s
 	union nf_conntrack_proto proto;
 
 	/* Extensions */

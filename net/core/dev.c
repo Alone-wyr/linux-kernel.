@@ -2100,7 +2100,8 @@ static inline struct sk_buff *handle_bridge(struct sk_buff *skb,
 					    struct net_device *orig_dev)
 {
 	struct net_bridge_port *port;
-
+	//数据包来自本地接口(loopback)或者是数据包的入口设备没有进行桥接..
+	//skb->dev->br_port作为桥接端口的结构体为空...那就不需要桥接处理..直接退出.
 	if (skb->pkt_type == PACKET_LOOPBACK ||  (port = rcu_dereference(skb->dev->br_port)) == NULL)
 		return skb;
 

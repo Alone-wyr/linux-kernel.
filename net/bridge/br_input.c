@@ -46,9 +46,11 @@ int br_handle_frame_finish(struct sk_buff *skb)
 		goto drop;
 
 	/* insert into forwarding database after filtering to avoid spoofing */
+	//帧的源MAC地址都会加入到数据库....
 	br = p->br;
 	br_fdb_update(br, p, eth_hdr(skb)->h_source);
-
+	//处于学习状态..在上面的函数学习好了...就把数据包给丢了..
+	//它并不会去转发数据包咯.!!
 	if (p->state == BR_STATE_LEARNING)
 		goto drop;
 
@@ -66,7 +68,6 @@ int br_handle_frame_finish(struct sk_buff *skb)
 	} else if ((dst = __br_fdb_get(br, dest)) && dst->is_local) {
 	/*
 	这里是一个重要的过程...尝试去在转发数据库里面寻找entry...
-	如果找到的entry指示为local的..那在后面会调用br_pass_frame_up..该函数会再次调用netif_receive_skb..
 	*/
 		skb2 = skb;									
 		/* Do not forward the packet since it's local. */
@@ -164,12 +165,16 @@ forward:
 		}
 		/* fall through */
 	case BR_STATE_LEARNING:
+		//判断是不是发送给自己的...比较网桥设备的链路层地址..
 		if (!compare_ether_addr(p->br->dev->dev_addr, dest))
 			skb->pkt_type = PACKET_HOST;
 
 		NF_HOOK(PF_BRIDGE, NF_BR_PRE_ROUTING, skb, skb->dev, NULL, br_handle_frame_finish);
 		break;
 	default:
+	/*
+	网桥端口处于BR_STATE_FORWARDING才可以转发数据的.不处于该状态直接丢弃掉数据.
+	*/
 drop:
 		kfree_skb(skb);
 	}

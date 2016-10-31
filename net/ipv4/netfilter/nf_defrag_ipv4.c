@@ -49,11 +49,16 @@ static unsigned int ipv4_conntrack_defrag(unsigned int hooknum,
 #endif
 #endif
 	/* Gather fragments. */
+	//frag_off就是3个标记加上偏移量...(16bit).
+	//对于一个没有分片的数组包它的MF标记为0.偏移量为0..
+	//因此如果与结果后不为0..代表它就是一个分片吧.
 	if (ip_hdr(skb)->frag_off & htons(IP_MF | IP_OFFSET)) {
 		if (nf_ct_ipv4_gather_frags(skb,
 					    hooknum == NF_INET_PRE_ROUTING ?
 					    IP_DEFRAG_CONNTRACK_IN :
 					    IP_DEFRAG_CONNTRACK_OUT))
+	//分组还没有收完全...然后直接在netfilter层给"stolen"掉..它的数据结构都还在..
+	//但是网络协议栈后面就处理不到该数据包了.
 			return NF_STOLEN;
 	}
 	return NF_ACCEPT;
