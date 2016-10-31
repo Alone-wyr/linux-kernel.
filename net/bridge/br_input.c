@@ -66,6 +66,7 @@ int br_handle_frame_finish(struct sk_buff *skb)
 	} else if ((dst = __br_fdb_get(br, dest)) && dst->is_local) {
 	/*
 	这里是一个重要的过程...尝试去在转发数据库里面寻找entry...
+	如果找到的entry指示为local的..那在后面会调用br_pass_frame_up..该函数会再次调用netif_receive_skb..
 	*/
 		skb2 = skb;									
 		/* Do not forward the packet since it's local. */
@@ -74,12 +75,12 @@ int br_handle_frame_finish(struct sk_buff *skb)
 
 	if (skb2 == skb)
 		skb2 = skb_clone(skb, GFP_ATOMIC);				//执行到这里面..
-/*
-只要skb2不为空...则会调用函数br_pass_frame_up，该函数是把数据包再次调用netif_receive_skb..
-1.网卡处于混杂模式..
-2.数据包指示的MAC地址为多播..
-3.转发数据库找到的entry指明是本地的..
-*/
+	/*
+	只要skb2不为空...则会调用函数br_pass_frame_up，该函数是把数据包再次调用netif_receive_skb..
+	1.网卡处于混杂模式..(那就是接受任何数据包咯..因此也需要发送到本地.)
+	2.数据包指示的MAC地址为多播..
+	3.转发数据库找到的entry指明是本地的..
+	*/
 	if (skb2)
 		br_pass_frame_up(br, skb2);	
 

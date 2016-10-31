@@ -41,8 +41,7 @@ static bool redirect_tg_check(const struct xt_tgchk_param *par)
 	return true;
 }
 
-static unsigned int
-redirect_tg(struct sk_buff *skb, const struct xt_target_param *par)
+static unsigned int redirect_tg(struct sk_buff *skb, const struct xt_target_param *par)
 {
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
@@ -66,6 +65,8 @@ redirect_tg(struct sk_buff *skb, const struct xt_target_param *par)
 		newdst = 0;
 
 		rcu_read_lock();
+		//好吧...我猜测吧..也就是设置为dev的IP地址吧....最终都是转化为访问本地的数据包啦..
+		//前面的设置为127.0.0.1是因为数据包来自于本身..(OUTPUT链)
 		indev = __in_dev_get_rcu(skb->dev);
 		if (indev && (ifa = indev->ifa_list))
 			newdst = ifa->ifa_local;

@@ -2261,10 +2261,10 @@ int netif_receive_skb(struct sk_buff *skb)
 	/* if we've gotten here through NAPI, check netpoll */
 	if (netpoll_receive_skb(skb))
 		return NET_RX_DROP;
-
+	//给数据包打上时间戳...记录接受的时间..
 	if (!skb->tstamp.tv64)
 		net_timestamp(skb);
-
+	//iif(in interface).设置进入接口的索引..
 	if (!skb->iif)
 		skb->iif = skb->dev->ifindex;
 
@@ -2296,10 +2296,10 @@ int netif_receive_skb(struct sk_buff *skb)
 	}
 #endif
 
-//循环链表..因此一个数据包可以被放入到多个协议的回调函数里面进行处理咯..
+	//循环链表..因此一个数据包可以被放入到多个协议的回调函数里面进行处理咯..
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
 	//可以看到当注册一个协议的时候..如果设置的dev字段为NULL..那它会捕获所有的数据包...
-	//如果不是NULL..那就捕获它制定的net device的数据包..
+	//如果不是NULL..那就捕获它指定的net device的数据包..
 	//最终就是调用协议的func字段指定的回调函数..
 	//同时也可以看到，它和ptype_base的区别也在它只匹配接口..并不匹配协议..
 		if (ptype->dev == null_or_orig || ptype->dev == skb->dev ||  ptype->dev == orig_dev) {

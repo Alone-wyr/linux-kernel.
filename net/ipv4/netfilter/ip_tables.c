@@ -716,11 +716,9 @@ static int check_target(struct ipt_entry *e, const char *name)
 	};
 	int ret;
 
-	ret = xt_check_target(&par, t->u.target_size - sizeof(*t),
-	      e->ip.proto, e->ip.invflags & IPT_INV_PROTO);
+	ret = xt_check_target(&par, t->u.target_size - sizeof(*t), e->ip.proto, e->ip.invflags & IPT_INV_PROTO);
 	if (ret < 0) {
-		duprintf("ip_tables: check failed for `%s'.\n",
-			 t->u.kernel.target->name);
+		duprintf("ip_tables: check failed for `%s'.\n",  t->u.kernel.target->name);
 		return ret;
 	}
 	return 0;
@@ -923,8 +921,7 @@ size´ú±íÊý×éËùÕ¼ÓÃÄÚ´æµÄ³¤¶È(Ã¿¸öentryµÄ³¤¶ÈÊÇ²»Ò»ÑùµÄ.)Ã¿¸öentryµÄ³¤¶È±£´æÔÚ½á¹
 2¡¢±éÀúxt[af].target£¬²éÕÒ·ûºÏÌõ¼þµÄtarget£¬²¢¸³Öµ¸øt->u.kernel.target
 */
 	i = 0;
-	ret = IPT_ENTRY_ITERATE(entry0, newinfo->size,
-				find_check_entry, name, size, &i);
+	ret = IPT_ENTRY_ITERATE(entry0, newinfo->size, find_check_entry, name, size, &i);
 
 	if (ret != 0) {
 		IPT_ENTRY_ITERATE(entry0, newinfo->size,
@@ -1378,8 +1375,7 @@ do_replace(struct net *net, void __user *user, unsigned int len)
 
 	/* choose the copy that is on our node/cpu */
 	loc_cpu_entry = newinfo->entries[raw_smp_processor_id()];
-	if (copy_from_user(loc_cpu_entry, user + sizeof(tmp),
-			   tmp.size) != 0) {
+	if (copy_from_user(loc_cpu_entry, user + sizeof(tmp), tmp.size) != 0) {
 		ret = -EFAULT;
 		goto free_newinfo;
 	}

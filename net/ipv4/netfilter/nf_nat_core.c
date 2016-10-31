@@ -157,8 +157,7 @@ find_appropriate_src(struct net *net,
 		ct = nat->ct;
 		if (same_src(ct, tuple)) {
 			/* Copy source part from reply tuple. */
-			nf_ct_invert_tuplepr(result,
-				       &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
+			nf_ct_invert_tuplepr(result, &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
 			result->dst = tuple->dst;
 
 			if (in_range(result, range)) {
@@ -240,8 +239,7 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 	   This is only required for source (ie. NAT/masq) mappings.
 	   So far, we don't do local source mappings, so multiple
 	   manips not an issue.  */
-	if (maniptype == IP_NAT_MANIP_SRC &&
-	    !(range->flags & IP_NAT_RANGE_PROTO_RANDOM)) {
+	if (maniptype == IP_NAT_MANIP_SRC && !(range->flags & IP_NAT_RANGE_PROTO_RANDOM)) {
 		if (find_appropriate_src(net, orig_tuple, tuple, range)) {
 			pr_debug("get_unique_tuple: Found current src map\n");
 			if (!nf_nat_used_tuple(tuple, ct))
@@ -251,6 +249,11 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 
 	/* 2) Select the least-used IP/proto combination in the given
 	   range. */
+	/*
+		range里面有记录需要进行nat转换的ip地址..拷贝orig_tuple到tuple.
+		然后进入函数..会去判断是进行SNAT还是DNAT转换..转换后的结果就是在tuple咯!!
+		range变量保存着需要转换的ip地址.
+	*/
 	*tuple = *orig_tuple;
 	find_best_ips_proto(tuple, range, ct, maniptype);
 
@@ -258,6 +261,7 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 	   the range to make a unique tuple. */
 
 	rcu_read_lock();
+	//获取tcp/udp/icmp等协议对于nat的操作集合..比如对于tcp: nf_nat_protocol_tcp
 	proto = __nf_nat_proto_find(orig_tuple->dst.protonum);
 
 	/* Change protocol info to have some randomization */
@@ -267,21 +271,23 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 	}
 
 	/* Only bother mapping if it's not already in range and unique */
+	/*
+		看了下代码就是检测port是否可用...当tuple指定的port是在range->[min, max]里面的时候..就需要调用函数nf_nat_used_tuple
+		判断是否可用...那如果不是range->[min, max]里面那就是可用的.
+		range是用户强制限定端口的范围...那大部分是不会加以限制的...因此会在根据系统当前的情况分陪空闲的port.
+	*/
 	if ((!(range->flags & IP_NAT_RANGE_PROTO_SPECIFIED) ||
-	     proto->in_range(tuple, maniptype, &range->min, &range->max)) &&
-	    !nf_nat_used_tuple(tuple, ct))
+	     proto->in_range(tuple, maniptype, &range->min, &range->max)) && !nf_nat_used_tuple(tuple, ct))
 		goto out;
 
 	/* Last change: get protocol to try to obtain unique tuple. */
+	//类似端口映射动作...确定端口的唯一性...
 	proto->unique_tuple(tuple, range, maniptype, ct);
 out:
 	rcu_read_unlock();
 }
 
-unsigned int
-nf_nat_setup_info(struct nf_conn *ct,
-		  const struct nf_nat_range *range,
-		  enum nf_nat_manip_type maniptype)
+unsigned int nf_nat_setup_info(struct nf_conn *ct,  const struct nf_nat_range *range,  enum nf_nat_manip_type maniptype)
 {
 	struct net *net = nf_ct_net(ct);
 	struct nf_conntrack_tuple curr_tuple, new_tuple;
@@ -306,18 +312,30 @@ nf_nat_setup_info(struct nf_conn *ct,
 	   manipulations (future optimization: if num_manips == 0,
 	   orig_tp =
 	   conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple) */
+	 /*
+		 在创建struct conntrack的时候就已经为orignal和reply都初始化好了tuple...但是如果需要进行nat转换的话.
+	 	那初始化好的tuple都是过时需要update一下的.
+	 	根据reply来得到original的tuple..
+	 */
 	nf_ct_invert_tuplepr(&curr_tuple, &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
-
+	/*
+		这里获取唯一tuple到new_tuple,,,那其实就是经过IP转换或者是端口转换后得到的tuple咯..
+		这个new_tuple很重要!!!不过要记得它还依旧是original方向的tuple，只是经过转换了而已!!
+	*/
 	get_unique_tuple(&new_tuple, &curr_tuple, range, ct, maniptype);
 
 	if (!nf_ct_tuple_equal(&new_tuple, &curr_tuple)) {
 		struct nf_conntrack_tuple reply;
 
 		/* Alter conntrack table so will recognize replies. */
+		//根据转换后的original方向的tuple，来获取到转换后的reply的tuple
+		//然后赋值到ct->tuplehash[IP_CT_DIR_REPLY].tuple
 		nf_ct_invert_tuplepr(&reply, &new_tuple);
 		nf_conntrack_alter_reply(ct, &reply);
 
 		/* Non-atomic: we own this at the moment. */
+		//好的...这里标记上要snat或dnat转换...这个也很重要!!!是否要NAT转换就是根据status来判断的
+		//在函数nf_nat_packet完成.
 		if (maniptype == IP_NAT_MANIP_SRC)
 			ct->status |= IPS_SRC_NAT;
 		else

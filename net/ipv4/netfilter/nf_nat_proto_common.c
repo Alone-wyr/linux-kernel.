@@ -29,8 +29,7 @@ bool nf_nat_proto_in_range(const struct nf_conntrack_tuple *tuple,
 	else
 		port = tuple->dst.u.all;
 
-	return ntohs(port) >= ntohs(min->all) &&
-	       ntohs(port) <= ntohs(max->all);
+	return ntohs(port) >= ntohs(min->all) && ntohs(port) <= ntohs(max->all);
 }
 EXPORT_SYMBOL_GPL(nf_nat_proto_in_range);
 
@@ -51,6 +50,7 @@ bool nf_nat_proto_unique_tuple(struct nf_conntrack_tuple *tuple,
 
 	/* If no range specified... */
 	if (!(range->flags & IP_NAT_RANGE_PROTO_SPECIFIED)) {
+		//没有指定范围(range)
 		/* If it's dst rewrite, can't change port */
 		if (maniptype == IP_NAT_MANIP_DST)
 			return false;
@@ -69,10 +69,11 @@ bool nf_nat_proto_unique_tuple(struct nf_conntrack_tuple *tuple,
 			range_size = 65535 - 1024 + 1;
 		}
 	} else {
+		//有指定范围(range)
 		min = ntohs(range->min.all);
 		range_size = ntohs(range->max.all) - min + 1;
 	}
-
+	//看宏感觉是随机分配port.
 	if (range->flags & IP_NAT_RANGE_PROTO_RANDOM)
 		off = secure_ipv4_port_ephemeral(tuple->src.u3.ip, tuple->dst.u3.ip,
 						 maniptype == IP_NAT_MANIP_SRC
@@ -80,7 +81,7 @@ bool nf_nat_proto_unique_tuple(struct nf_conntrack_tuple *tuple,
 						 : tuple->src.u.all);
 	else
 		off = *rover;
-
+	//off的存在只是为了说让port的分配从低到高慢慢分配上去...
 	for (i = 0; i < range_size; i++, off++) {
 		*portptr = htons(min + off % range_size);
 		if (nf_nat_used_tuple(tuple, ct))
