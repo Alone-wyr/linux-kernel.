@@ -65,8 +65,9 @@ icmp_manip_pkt(struct sk_buff *skb,
 		return false;
 
 	hdr = (struct icmphdr *)(skb->data + hdroff);
-	inet_proto_csum_replace2(&hdr->checksum, skb,
-				 hdr->un.echo.id, tuple->src.u.icmp.id, 0);
+	//替换一下id号...对于路由器来说它应该替换为从LAN口接受到icmp包原本的id号咯.
+	//然后也需要重新计算checksum..!!!
+	inet_proto_csum_replace2(&hdr->checksum, skb, hdr->un.echo.id, tuple->src.u.icmp.id, 0);
 	hdr->un.echo.id = tuple->src.u.icmp.id;
 	return true;
 }

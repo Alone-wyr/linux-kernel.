@@ -71,7 +71,8 @@ struct icmphdr {
   __sum16	checksum;
   union {
 	struct {
-		__be16	id;
+		//这个字段一般就是填写进程ID号....因此可以同时存在多个ping程序，因为接收到的ping包可以通过该字段进行区分咯!!!
+		__be16	id;			
 		__be16	sequence;
 	} echo;
 	__be32	gateway;

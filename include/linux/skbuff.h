@@ -378,7 +378,7 @@ hdr_len:ip头的大小??
 				ipvs_property:1,
 				peeked:1,
 				nf_trace:1;
-//记录的是L2头中的协议字段...典型的就是IP/IPV6/ARP..
+//记录的是L2头中的协议字段...典型的就是IP/IPV6/ARP..PPPOE
 	__be16			protocol;
 //缓冲区要被删除的时候调用...
 	void			(*destructor)(struct sk_buff *skb);

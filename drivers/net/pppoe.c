@@ -176,8 +176,7 @@ static struct pppox_sock *__get_item(struct pppoe_net *pn, __be16 sid,
 
 	ret = pn->hash_table[hash];
 	while (ret) {
-		if (cmp_addr(&ret->pppoe_pa, sid, addr) &&
-		    ret->pppoe_ifindex == ifindex)
+		if (cmp_addr(&ret->pppoe_pa, sid, addr) &&  ret->pppoe_ifindex == ifindex)
 			return ret;
 
 		ret = ret->next;
@@ -391,8 +390,7 @@ static int pppoe_rcv_core(struct sock *sk, struct sk_buff *skb)
 	if (sk->sk_state & PPPOX_BOUND) {
 		ppp_input(&po->chan, skb);
 	} else if (sk->sk_state & PPPOX_RELAY) {
-		relay_po = get_item_by_addr(dev_net(po->pppoe_dev),
-						&po->pppoe_relay);
+		relay_po = get_item_by_addr(dev_net(po->pppoe_dev), &po->pppoe_relay);
 		if (relay_po == NULL)
 			goto abort_kfree;
 

@@ -263,6 +263,10 @@ static inline int compute_score(struct sock *sk, struct net *net, __be32 saddr,
 		struct inet_sock *inet = inet_sk(sk);
 
 		score = (sk->sk_family == PF_INET ? 1 : 0);
+	/*
+		就是判断源IP地址(saddr)，目的IP地址(daddr)，还有端口，此外如果有绑定只接受哪个网卡设备的数据，那也
+		需要判断该数据包是不是从那个接口接收到的..
+	*/
 		if (inet->rcv_saddr) {
 			if (inet->rcv_saddr != daddr)
 				return -1;
@@ -913,13 +917,19 @@ int udp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		return ip_recv_error(sk, msg, len);
 
 try_again:
-	skb = __skb_recv_datagram(sk, flags | (noblock ? MSG_DONTWAIT : 0),
-				  &peeked, &err);
+	/*
+		该函数调用结束后...skb就只是指向数据包了...它从struct sock->sk_receive_queue链表上
+		取下数据包.....
+	*/
+	skb = __skb_recv_datagram(sk, flags | (noblock ? MSG_DONTWAIT : 0), &peeked, &err);
 	if (!skb)
 		goto out;
-
+	//现在是属于udp层...它一般就是从网络层接受到的....在发送到UDP层之前..
+	//网络层就已经去掉它自己的头了，因此这里的skb->len就是udp头加上udp数据.
 	ulen = skb->len - sizeof(struct udphdr);
 	copied = len;
+	//如果收到的数据包长度大于用户空间请假的..那就截断数据包.设置了flag = MSG_TRUNC来让用户空间知道.
+	//这个数据包其实是截断过的!.
 	if (copied > ulen)
 		copied = ulen;
 	else if (copied < ulen)
@@ -930,15 +940,15 @@ try_again:
 	 * data.  If the data is truncated, or if we only want a partial
 	 * coverage checksum (UDP-Lite), do it before the copy.
 	 */
-
+	//这里的判断条件成立的情况下就是接收到的数据包长度是大于用户请求的....
+	//只能猜测是否要重新计算checksum吗??
 	if (copied < ulen || UDP_SKB_CB(skb)->partial_cov) {
 		if (udp_lib_checksum_complete(skb))
 			goto csum_copy_err;
 	}
 
 	if (skb_csum_unnecessary(skb))
-		err = skb_copy_datagram_iovec(skb, sizeof(struct udphdr),
-					      msg->msg_iov, copied       );
+		err = skb_copy_datagram_iovec(skb, sizeof(struct udphdr), msg->msg_iov, copied       );
 	else {
 		err = skb_copy_and_csum_datagram_iovec(skb, sizeof(struct udphdr), msg->msg_iov);
 
@@ -950,14 +960,15 @@ try_again:
 		goto out_free;
 
 	if (!peeked)
-		UDP_INC_STATS_USER(sock_net(sk),
-				UDP_MIB_INDATAGRAMS, is_udplite);
+		UDP_INC_STATS_USER(sock_net(sk), UDP_MIB_INDATAGRAMS, is_udplite);
 
 	sock_recv_timestamp(msg, sk, skb);
 
 	/* Copy the address. */
 	if (sin)
 	{
+		//如果用户空间希望知道数据包的来源...
+		//这里就是获取到传输层设置的端口...和网络层设置的ip地址....
 		sin->sin_family = AF_INET;
 		sin->sin_port = udp_hdr(skb)->source;
 		sin->sin_addr.s_addr = ip_hdr(skb)->saddr;
@@ -1247,8 +1258,7 @@ static inline int udp4_csum_init(struct sk_buff *skb, struct udphdr *uh,
  *	All we need to do is get the socket, and then do a checksum.
  */
 
-int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
-		   int proto)
+int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable, int proto)
 {
 	struct sock *sk;
 	struct udphdr *uh;
@@ -1282,9 +1292,9 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 	daddr = ip_hdr(skb)->daddr;
 
 	if (rt->rt_flags & (RTCF_BROADCAST|RTCF_MULTICAST))
-		return __udp4_lib_mcast_deliver(net, skb, uh,
-				saddr, daddr, udptable);
-
+		return __udp4_lib_mcast_deliver(net, skb, uh, saddr, daddr, udptable);
+	//数据包进入到传输层之后...它需要判断是发送给哪个struct sock的...
+	//下面函数就是确定一个接受该数据包的struct sock..也可能是不存在..那就返回一个icmp数据包.
 	sk = __udp4_lib_lookup_skb(skb, uh->source, uh->dest, udptable);
 
 	if (sk != NULL) {
