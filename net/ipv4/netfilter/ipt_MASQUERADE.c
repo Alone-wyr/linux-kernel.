@@ -92,8 +92,12 @@ masquerade_tg(struct sk_buff *skb, const struct xt_target_param *par)
 	return nf_nat_setup_info(ct, &newrange, IP_NAT_MANIP_SRC);
 }
 
-static int
-device_cmp(struct nf_conn *i, void *ifindex)
+/*
+当down掉一个网络接口的时候....需要clear掉该接口的所有经过maquerade后的链接跟踪...该函数
+就是用来作为比较是否clear到参数传递过来的struct nf_conn....可以看到比较的过程就是
+判断该struct nf_connn的masq_index的是否相等..
+*/
+static int device_cmp(struct nf_conn *i, void *ifindex)
 {
 	const struct nf_conn_nat *nat = nfct_nat(i);
 	int ret;

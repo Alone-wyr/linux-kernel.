@@ -761,12 +761,14 @@ void add_timer_on(struct timer_list *timer, int cpu)
  * del_timer - deactive a timer.
  * @timer: the timer to be deactivated
  *
+ 			失效一个定时器...它对于已经激活的和还没有激活的定时器都可以作用啦.
  * del_timer() deactivates a timer - this works on both active and inactive
  * timers.
  *
  * The function returns whether it has deactivated a pending timer or not.
  * (ie. del_timer() of an inactive timer returns 0, del_timer() of an
  * active timer returns 1.)
+   该函数删除掉一个没有激活的定时器返回0....删除已经激活的定时器则返回1啦.
  */
 int del_timer(struct timer_list *timer)
 {
@@ -775,9 +777,12 @@ int del_timer(struct timer_list *timer)
 	int ret = 0;
 
 	timer_stats_timer_clear_start_info(timer);
+	//判断一个定时器是不是处于激活状态...就看timer_pending的返回值啦..
+	//如果定时器是已经激活的,,,那它是添加到一个链表上面去的啦.
 	if (timer_pending(timer)) {
 		base = lock_timer_base(timer, &flags);
 		if (timer_pending(timer)) {
+			//确定从链表上删除掉该定时器啦....
 			detach_timer(timer, 1);
 			ret = 1;
 		}

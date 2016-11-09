@@ -21,6 +21,7 @@
 #include <net/fib_rules.h>
 
 struct fib_config {
+	//目的地址长度...对于host那就是32咯...对于net那就是掩码长度.
 	u8			fc_dst_len;
 	u8			fc_tos;
 	u8			fc_protocol;
@@ -28,8 +29,11 @@ struct fib_config {
 	u8			fc_type;
 	/* 3 bytes unused */
 	u32			fc_table;
+	//目的地址...可以是host或者是net等.
 	__be32			fc_dst;
+	//如果目的地址是网关...则网关地址存放到这里来..
 	__be32			fc_gw;
+	//out interface...出口接口索引.
 	int			fc_oif;
 	u32			fc_flags;
 	u32			fc_priority;
@@ -120,7 +124,7 @@ struct fib_result_nl {
 	unsigned char	scope;
 	int             err;      
 };
-
+//看了一下.config文件...这个配置有.
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 
 #define FIB_RES_NH(res)		((res).fi->fib_nh[(res).nh_sel])

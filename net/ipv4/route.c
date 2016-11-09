@@ -2068,7 +2068,12 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr, 
 	/* Check for the most weird martians, which can be not detected
 	   by fib_lookup.
 	 */
-
+	/*
+	源IP地址如果是multicast,broadcast,loopback地址，意味着数据报不知道从哪来的，只能把数据报废掉了。
+	目标IP地址如果是braodcast呢？这时有可能是发给自己的啊，所以这时要处理的。源IP可能是0地址么？其实
+	这种情况在网络中还是经常发生的，比如DHCP的情况。如果Linxu作为DHCP服务器，当然要处理这种情况了。
+	这时目标IP地址就是广播地址，所以之后的处理就到brd_input。
+	*/
 	if (ipv4_is_multicast(saddr) || ipv4_is_lbcast(saddr) || ipv4_is_loopback(saddr))
 		goto martian_source;
 
@@ -2087,7 +2092,12 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr, 
 	/*
 	 *	Now we are ready to route packet.
 	 */
+	 //查找路由..先在local表上找..如果找不到就在main表上找.
 	if ((err = fib_lookup(net, &fl, &res)) != 0) {
+		/*
+			判断转发参数是否打开....详解查看blog:
+			http://blog.chinaunix.net/uid-20788636-id-4398392.html
+		*/
 		if (!IN_DEV_FORWARD(in_dev))
 			goto e_hostunreach;
 		goto no_route;
@@ -2101,9 +2111,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr, 
 
 	if (res.type == RTN_LOCAL) {
 		int result;
-		result = fib_validate_source(saddr, daddr, tos,
-					     net->loopback_dev->ifindex,
-					     dev, &spec_dst, &itag);
+		result = fib_validate_source(saddr, daddr, tos, net->loopback_dev->ifindex, dev, &spec_dst, &itag);
 		if (result < 0)
 			goto martian_source;
 		if (result)
@@ -2111,7 +2119,8 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr, 
 		spec_dst = daddr;
 		goto local_input;
 	}
-
+	//有匹配路由...而且路由的type不是LOCAL的...那就是需要转发吧...
+	//此时去判断是否开启转发功能....
 	if (!IN_DEV_FORWARD(in_dev))
 		goto e_hostunreach;
 	if (res.type != RTN_UNICAST)
@@ -2239,7 +2248,8 @@ int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr, u8 tos, stru
 	rcu_read_lock();
 	for (rth = rcu_dereference(rt_hash_table[hash].chain); rth;
 	     rth = rcu_dereference(rth->u.dst.rt_next)) {
-	//然后需要完整性的匹配...daddr saddr iif tos mark 
+	//然后需要完整性的匹配...daddr saddr iif tos mark(策略路由.)
+	//oif应该为0?
 		if (((rth->fl.fl4_dst ^ daddr) |
 		     (rth->fl.fl4_src ^ saddr) |
 		     (rth->fl.iif ^ iif) |
@@ -2657,6 +2667,7 @@ int __ip_route_output_key(struct net *net, struct rtable **rp,
 	rcu_read_lock_bh();
 	for (rth = rcu_dereference(rt_hash_table[hash].chain); rth;
 		rth = rcu_dereference(rth->u.dst.rt_next)) {
+	//输出的数据包检索路由...匹配  dst / src / iif / oif / tos / mark(策略路由)
 		if (rth->fl.fl4_dst == flp->fl4_dst &&
 		    rth->fl.fl4_src == flp->fl4_src &&
 		    rth->fl.iif == 0 &&

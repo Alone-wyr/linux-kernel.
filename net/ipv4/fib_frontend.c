@@ -60,10 +60,8 @@ static int __net_init fib4_rules_init(struct net *net)
 		goto fail;
 	//fib_table_hash为调用该函数时候分配的一个hash数组..也是只有2个数组项...
 	//因此就是把fib_table分别添加到对应的hlist上..
-	hlist_add_head_rcu(&local_table->tb_hlist,
-				&net->ipv4.fib_table_hash[TABLE_LOCAL_INDEX]);
-	hlist_add_head_rcu(&main_table->tb_hlist,
-				&net->ipv4.fib_table_hash[TABLE_MAIN_INDEX]);
+	hlist_add_head_rcu(&local_table->tb_hlist, &net->ipv4.fib_table_hash[TABLE_LOCAL_INDEX]);
+	hlist_add_head_rcu(&main_table->tb_hlist, &net->ipv4.fib_table_hash[TABLE_MAIN_INDEX]);
 	return 0;
 
 fail:
@@ -352,7 +350,8 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 
 		if (bad_mask(mask, addr))
 			return -EINVAL;
-
+		//不是主机的router...才需要计算掩码长度...如果是HOST的...
+		//那就是32bit的掩码咯...
 		plen = inet_mask_len(mask);
 	}
 
@@ -380,7 +379,7 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 		char *colon;
 		struct net_device *dev;
 		char devname[IFNAMSIZ];
-
+		//拷贝出口接口名..
 		if (copy_from_user(devname, rt->rt_dev, IFNAMSIZ-1))
 			return -EFAULT;
 
@@ -388,9 +387,11 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 		colon = strchr(devname, ':');
 		if (colon)
 			*colon = 0;
+		//根据接口名来得到struct net_device结构体..
 		dev = __dev_get_by_name(net, devname);
 		if (!dev)
 			return -ENODEV;
+		//设置出口的接口索引...(索引对于接口来说是唯一的.)
 		cfg->fc_oif = dev->ifindex;
 		if (colon) {
 			struct in_ifaddr *ifa;
@@ -468,10 +469,14 @@ int ip_rt_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 			return -EFAULT;
 
 		rtnl_lock();
+		//用struct rtentry去初始化struct fib_config..!
 		err = rtentry_to_fib_config(net, cmd, &rt, &cfg);
 		if (err == 0) {
 			struct fib_table *tb;
-
+		/*
+		一共有2个table...main和local...
+		在初始化的时候就已经为table分配好了空间..因此理论上来说不管是delete或是add都可以获取到table啦..
+		*/
 			if (cmd == SIOCDELRT) {
 				tb = fib_get_table(net, cfg.fc_table);
 				if (tb)
@@ -980,8 +985,7 @@ static int __net_init ip_fib_net_init(struct net *net)
 		//分别用于
 		//#define TABLE_LOCAL_INDEX	0
 		//#define TABLE_MAIN_INDEX	1
-	net->ipv4.fib_table_hash = kzalloc(
-			sizeof(struct hlist_head)*FIB_TABLE_HASHSZ, GFP_KERNEL);
+	net->ipv4.fib_table_hash = kzalloc(sizeof(struct hlist_head)*FIB_TABLE_HASHSZ, GFP_KERNEL);
 	if (net->ipv4.fib_table_hash == NULL)
 		return -ENOMEM;
 

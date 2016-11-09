@@ -212,10 +212,10 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 		struct net_protocol *ipprot;
 
 	resubmit:
-		//查看是否有原始套接字会接受该数据包...
-		//原始套接字是工作与网络层或者是链路层的.(那是不是意味着应该有2个地方要匹配原始套接字??)
-		//函数packet_create这里是创建在链路层传输数据给原始套接字的..那这里就是网络层传输给套接字咯?
-		//它没有TCP或UDP协议这样的说法...上层的应用就是工作与传输层咯.
+		/*
+		发送给protocol为raw的struct sock...如果返回值raw不为0..那就是说有lookup到struct sock来
+		处理该数据包啦.
+		*/
 		raw = raw_local_deliver(skb, protocol);
 
 		hash = protocol & (MAX_INET_PROTOS - 1);
@@ -250,10 +250,11 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 			IP_INC_STATS_BH(net, IPSTATS_MIB_INDELIVERS);
 		} else {
 			if (!raw) {
+				//来到这里呢...代表说数据包在raw中没有接受处理...也没有其他的protocol的struct sock
+				//来处理它...因此返回一个icmp.(unreach)
 				if (xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
 					IP_INC_STATS_BH(net, IPSTATS_MIB_INUNKNOWNPROTOS);
-					icmp_send(skb, ICMP_DEST_UNREACH,
-						  ICMP_PROT_UNREACH, 0);
+					icmp_send(skb, ICMP_DEST_UNREACH,  ICMP_PROT_UNREACH, 0);
 				}
 			} else
 				IP_INC_STATS_BH(net, IPSTATS_MIB_INDELIVERS);

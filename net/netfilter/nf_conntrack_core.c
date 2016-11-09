@@ -1014,10 +1014,12 @@ found:
 	spin_unlock_bh(&nf_conntrack_lock);
 	return ct;
 }
-
-void nf_ct_iterate_cleanup(struct net *net,
-			   int (*iter)(struct nf_conn *i, void *data),
-			   void *data)
+/*
+要clear掉某一类的链接跟踪....差不多的意思就是遍历当前系统的所有struct nf_conn结构体(也就是已经被链接跟踪
+的连接，包括还未被confirmed的)...然后调用传递过来的参数iter函数...把每个struct nf_conn作为参数传递，还有一个
+是data,,,它就是用来比较说这个传递过来的struct nf_conn是否要被clear掉的...
+*/
+void nf_ct_iterate_cleanup(struct net *net, int (*iter)(struct nf_conn *i, void *data), void *data)
 {
 	struct nf_conn *ct;
 	unsigned int bucket = 0;

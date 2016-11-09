@@ -49,6 +49,10 @@
 
 struct fib_nh;
 struct inet_peer;
+/*
+rtable的字段都是一些匹配的信息..
+而struct dst_entry是对应的出入接口，邻居结点，下一步的处理函数.
+*/
 struct rtable
 {
 	union

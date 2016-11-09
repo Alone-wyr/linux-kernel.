@@ -79,8 +79,8 @@ static inline void ipv4_devconf_setall(struct in_device *in_dev)
 #define IN_DEV_MAXCONF(in_dev, attr) \
 	(max(IPV4_DEVCONF_ALL(dev_net(in_dev->dev), attr), \
 	     IN_DEV_CONF_GET((in_dev), attr)))
-
-#define IN_DEV_FORWARD(in_dev)		IN_DEV_CONF_GET((in_dev), FORWARDING)
+											//NET_IPV4_CONF_ FORWARDING
+#define IN_DEV_FORWARD(in_dev)		IN_DEV_CONF_GET((in_dev), FORWARDING)	
 #define IN_DEV_MFORWARD(in_dev)		IN_DEV_ANDCONF((in_dev), MC_FORWARDING)
 #define IN_DEV_RPFILTER(in_dev)		IN_DEV_ANDCONF((in_dev), RP_FILTER)
 #define IN_DEV_SOURCE_ROUTE(in_dev)	IN_DEV_ANDCONF((in_dev), \
@@ -216,7 +216,10 @@ static __inline__ __be32 inet_make_mask(int logmask)
 		return htonl(~((1<<(32-logmask))-1));
 	return 0;
 }
-
+/*
+得到掩码长度....也就是计算多少个连续的1吧...
+eg: 255.255.255.0 -> 24.
+*/
 static __inline__ int inet_mask_len(__be32 mask)
 {
 	__u32 hmask = ntohl(mask);

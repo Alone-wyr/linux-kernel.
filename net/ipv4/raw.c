@@ -165,13 +165,13 @@ static int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 	head = &raw_v4_hashinfo.ht[hash];
 	if (hlist_empty(head))
 		goto out;
-
+	//head就是指向一个链表...该链表的结点都是protocol相同的struct sock...
+	//然后遍历该链表来确定是否有哪个struct sock来处理该数据包啦..
 	net = dev_net(skb->dev);
-	sk = __raw_v4_lookup(net, __sk_head(head), iph->protocol,
-			     iph->saddr, iph->daddr,
-			     skb->dev->ifindex);
+	sk = __raw_v4_lookup(net, __sk_head(head), iph->protocol, iph->saddr, iph->daddr, skb->dev->ifindex);
 
 	while (sk) {
+		//来到这里代表至少说有一个struct sock可以处理该数据包....因此设置返回值为1...
 		delivered = 1;
 		if (iph->protocol != IPPROTO_ICMP || !icmp_filter(sk, skb)) {
 			struct sk_buff *clone = skb_clone(skb, GFP_ATOMIC);
@@ -180,9 +180,9 @@ static int raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 			if (clone)
 				raw_rcv(sk, clone);
 		}
-		sk = __raw_v4_lookup(net, sk_next(sk), iph->protocol,
-				     iph->saddr, iph->daddr,
-				     skb->dev->ifindex);
+		//可能存在多个struct sock同时处理一个数据包啦...主要还是看匹配规则(lookup)..
+		//这里看到只是匹配协议/源地址/目的地址.
+		sk = __raw_v4_lookup(net, sk_next(sk), iph->protocol, iph->saddr, iph->daddr, skb->dev->ifindex);
 	}
 out:
 	read_unlock(&raw_v4_hashinfo.lock);
@@ -193,7 +193,7 @@ int raw_local_deliver(struct sk_buff *skb, int protocol)
 {
 	int hash;
 	struct sock *raw_sk;
-	//根据protocol来得到raw_v4_hashinfo上的一个hash数组项..
+	//根据protocol来得到raw_v4_hashinfo上的一个hash数组项..(bucket).这个bucket存放的都是该protocl的struct sock...
 	//可以认为是一个链表的head咯...
 	//这个链表的结点是包含在struct sock结构体的...
 	hash = protocol & (RAW_HTABLE_SIZE - 1);
@@ -202,6 +202,8 @@ int raw_local_deliver(struct sk_buff *skb, int protocol)
 	/* If there maybe a raw socket we must check - if not we
 	 * don't care less
 	 */
+	 //raw_v4_input的返回值为是否有程序处理该数据包....如果返回为0就是没有查找到..返回1代表有查找到..
+	 //然后在看返回值..可见如果返回为1那就是有raw的socket处理了..否则没有啦.
 	if (raw_sk && !raw_v4_input(skb, ip_hdr(skb), hash))
 		raw_sk = NULL;
 

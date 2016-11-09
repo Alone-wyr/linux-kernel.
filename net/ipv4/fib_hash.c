@@ -254,25 +254,30 @@ fn_new_zone(struct fn_hash *table, int z)
 	return fz;
 }
 
-static int
-fn_hash_lookup(struct fib_table *tb, const struct flowi *flp, struct fib_result *res)
+static int fn_hash_lookup(struct fib_table *tb, const struct flowi *flp, struct fib_result *res)
 {
 	int err;
 	struct fn_zone *fz;
 	struct fn_hash *t = (struct fn_hash *)tb->tb_data;
 
 	read_lock(&fib_hash_lock);
+	/*
+	匹配的过程就是遍历所有可能的路由项...从掩码长度的大到小匹配...可以看到
+	fn_zone_list就是链表头.每个zone的fz_next连接到下一个区.
+	*/
 	for (fz = t->fn_zone_list; fz; fz = fz->fz_next) {
 		struct hlist_head *head;
 		struct hlist_node *node;
 		struct fib_node *f;
+		//fl4_dst是数据包的目的地址...这里就是得到网络地址..(网段)
 		__be32 k = fz_key(flp->fl4_dst, fz);
 
 		head = &fz->fz_hash[fn_hash(k, fz)];
 		hlist_for_each_entry(f, node, head, fn_hash) {
+			//首先判断网络地址是否存在...
 			if (f->fn_key != k)
 				continue;
-
+			//存在的情况下..判断该网络地址下的所有路由..
 			err = fib_semantic_match(&f->fn_alias,
 						 flp, res,
 						 f->fn_key, fz->fz_mask,
@@ -395,18 +400,23 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 
 	if (cfg->fc_dst_len > 32)
 		return -EINVAL;
-
+	//根据目的地址长度,..获取到一个fn_zone..目的地址长度...就是掩码长度...
 	fz = table->fn_zones[cfg->fc_dst_len];
 	if (!fz && !(fz = fn_new_zone(table, cfg->fc_dst_len)))
 		return -ENOBUFS;
 
 	key = 0;
 	if (cfg->fc_dst) {
+		//目的地址与上子网掩码的反码应该为0..
+		//eg: host的目的地址,,掩码长度32bit...反掩码一下那就是0.0.0.0..那与一下就肯定为0.
+		//       net的目的地址就需要进行下面if语句的判断....
 		if (cfg->fc_dst & ~FZ_MASK(fz))
 			return -EINVAL;
+		//获取网络地址...作为关键字.
 		key = fz_key(cfg->fc_dst, fz);
 	}
-
+	
+	//由struct fib_config翻译成路由系统使用的fib_info...
 	fi = fib_create_info(cfg);
 	if (IS_ERR(fi))
 		return PTR_ERR(fi);
@@ -416,14 +426,17 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 	    (cfg->fc_dst_len == 32 ||
 	     (1 << cfg->fc_dst_len) > fz->fz_divisor))
 		fn_rehash_zone(fz);
-
+	//判断指定网段的node是否已经存在.
 	f = fib_find_node(fz, key);
 
 	if (!f)
 		fa = NULL;
 	else
 		fa = fib_find_alias(&f->fn_alias, tos, fi->fib_priority);
-
+	//fa用来确定新的路由插入的位置....如果fa为null就添加到链表头.
+	//如果不是空的...那就添加到它后面(在fa和当前添加的不是相同的时候)
+	//如果相同还需要额外判断..
+	
 	/* Now fa, if non-NULL, points to the first fib alias
 	 * with the same keys [prefix,tos,priority], if such key already
 	 * exists or to the node before which we will insert new one.
@@ -435,11 +448,12 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 	 * and we need to allocate a new one of those as well.
 	 */
 
-	if (fa && fa->fa_tos == tos &&
-	    fa->fa_info->fib_priority == fi->fib_priority) {
+	if (fa && fa->fa_tos == tos && fa->fa_info->fib_priority == fi->fib_priority) {
+		//来到这里代表说当前已经存在一个网段相同....tos相同...priority相同的路由..
 		struct fib_alias *fa_first, *fa_match;
 
 		err = -EEXIST;
+		//该标记就是如果系统存在相同的...那就不添加了...你牛逼还不行吗..我不添加了.
 		if (cfg->fc_nlflags & NLM_F_EXCL)
 			goto out;
 
@@ -465,6 +479,7 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 		}
 
 		if (cfg->fc_nlflags & NLM_F_REPLACE) {
+			//这里就是要替换掉旧的啦...
 			struct fib_info *fi_drop;
 			u8 state;
 
@@ -487,8 +502,7 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 			fib_release_info(fi_drop);
 			if (state & FA_S_ACCESSED)
 				rt_cache_flush(cfg->fc_nlinfo.nl_net, -1);
-			rtmsg_fib(RTM_NEWROUTE, key, fa, cfg->fc_dst_len, tb->tb_id,
-				  &cfg->fc_nlinfo, NLM_F_REPLACE);
+			rtmsg_fib(RTM_NEWROUTE, key, fa, cfg->fc_dst_len, tb->tb_id,  &cfg->fc_nlinfo, NLM_F_REPLACE);
 			return 0;
 		}
 
@@ -539,8 +553,8 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 	write_lock_bh(&fib_hash_lock);
 	if (new_f)
 		fib_insert_node(fz, new_f);
-	list_add_tail(&new_fa->fa_list,
-		 (fa ? &fa->fa_list : &f->fn_alias));
+	//fa为null的话..就是添加到头...不为null的话..就添加到fa指向的node的后面咯.
+	list_add_tail(&new_fa->fa_list,  (fa ? &fa->fa_list : &f->fn_alias));
 	fib_hash_genid++;
 	write_unlock_bh(&fib_hash_lock);
 
@@ -548,8 +562,7 @@ static int fn_hash_insert(struct fib_table *tb, struct fib_config *cfg)
 		fz->fz_nent++;
 	rt_cache_flush(cfg->fc_nlinfo.nl_net, -1);
 
-	rtmsg_fib(RTM_NEWROUTE, key, new_fa, cfg->fc_dst_len, tb->tb_id,
-		  &cfg->fc_nlinfo, 0);
+	rtmsg_fib(RTM_NEWROUTE, key, new_fa, cfg->fc_dst_len, tb->tb_id, &cfg->fc_nlinfo, 0);
 	return 0;
 
 out:

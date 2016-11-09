@@ -333,6 +333,11 @@ errout:
 /* Return the first fib alias matching TOS with
  * priority less than or equal to PRIO.
  */
+ /*
+ 同一个网段下的路由在一个链表上..链表结点传递到了参数fah上了..
+ fib_node->fn_alias字段作为链表结点咯.
+ 链表的路由根据tos从小到大..对于相同tos的会根据路由的优先级排序是从大到小..(实验出来的...可能是对的吧..)
+ */
 struct fib_alias *fib_find_alias(struct list_head *fah, u8 tos, u32 prio)
 {
 	if (fah) {
@@ -340,8 +345,7 @@ struct fib_alias *fib_find_alias(struct list_head *fah, u8 tos, u32 prio)
 		list_for_each_entry(fa, fah, fa_list) {
 			if (fa->fa_tos > tos)
 				continue;
-			if (fa->fa_info->fib_priority >= prio ||
-			    fa->fa_tos < tos)
+			if (fa->fa_info->fib_priority >= prio || fa->fa_tos < tos)
 				return fa;
 		}
 	}
@@ -875,8 +879,7 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 	list_for_each_entry_rcu(fa, head, fa_list) {
 		int err;
 
-		if (fa->fa_tos &&
-		    fa->fa_tos != flp->fl4_tos)
+		if (fa->fa_tos && fa->fa_tos != flp->fl4_tos)
 			continue;
 
 		if (fa->fa_scope < flp->fl4_scope)
