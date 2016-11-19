@@ -96,6 +96,7 @@ struct dst_entry
 	unsigned long		lastuse;
 	union {
 		struct dst_entry *next;
+			//下一条路由缓存.
 		struct rtable    *rt_next;
 		struct rt6_info   *rt6_next;
 		struct dn_route  *dn_next;

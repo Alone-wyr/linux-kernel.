@@ -109,14 +109,12 @@ extern struct sock *genl_sock;
  *
  * Returns pointer to user specific header
  */
-static inline void *genlmsg_put(struct sk_buff *skb, u32 pid, u32 seq,
-				struct genl_family *family, int flags, u8 cmd)
+static inline void *genlmsg_put(struct sk_buff *skb, u32 pid, u32 seq, struct genl_family *family, int flags, u8 cmd)
 {
 	struct nlmsghdr *nlh;
 	struct genlmsghdr *hdr;
 
-	nlh = nlmsg_put(skb, pid, seq, family->id, GENL_HDRLEN +
-			family->hdrsize, flags);
+	nlh = nlmsg_put(skb, pid, seq, family->id, GENL_HDRLEN + family->hdrsize, flags);
 	if (nlh == NULL)
 		return NULL;
 

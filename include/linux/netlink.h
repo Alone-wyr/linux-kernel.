@@ -37,8 +37,19 @@ struct sockaddr_nl
        	__u32		nl_groups;	/* multicast groups mask */
 };
 
+/*
+该结构体是netlink的头...在用户进程中设置好各字段的值...然后调用sendmsg发送到内核.
+创建socket的时候指定了消息发送给哪个protocol...但是可能protocol里面还要细分更多的处理..
+此时就需要通过type字段来细分啦.当然也可以通过flags来细分...
+
+对于NETLINK_GENERIC协议来说....它根据type来确定一个family...
+确定了family,,family有个cmd字段来确定操作集合(ops)..然后每个操作集合又有doit和dumpit函数.
+在根据下面的nlmsg_flags的标记来判断到底是调用doit还是dumpit.
+*/
 struct nlmsghdr
 {
+			//消息和头的长度和...这个长度需要特别注意..
+			//它指示的应该是header(对齐后的长度) + message的长度(没有经过对齐!!!)
 	__u32		nlmsg_len;	/* Length of message including header */
 	__u16		nlmsg_type;	/* Message content */
 	__u16		nlmsg_flags;	/* Additional flags */
@@ -77,14 +88,21 @@ struct nlmsghdr
 #define NLMSG_ALIGNTO	4
 #define NLMSG_ALIGN(len) ( ((len)+NLMSG_ALIGNTO-1) & ~(NLMSG_ALIGNTO-1) )
 #define NLMSG_HDRLEN	 ((int) NLMSG_ALIGN(sizeof(struct nlmsghdr)))
+	//这个宏是确定netlink消息数据的长度??这里的长度是经过对齐后的header加上没有对齐的data长度...
+	//这样就可以计算出data的具体长度了..
 #define NLMSG_LENGTH(len) ((len)+NLMSG_ALIGN(NLMSG_HDRLEN))
+	//这个宏是确定netlink消息占用的空间大小...需要特别注意和NLMSG_LENGTH的差别..这个很重要!!!灵活运用这2个宏.
 #define NLMSG_SPACE(len) NLMSG_ALIGN(NLMSG_LENGTH(len))
+	//返回data的起始地址..
 #define NLMSG_DATA(nlh)  ((void*)(((char*)nlh) + NLMSG_LENGTH(0)))
 #define NLMSG_NEXT(nlh,len)	 ((len) -= NLMSG_ALIGN((nlh)->nlmsg_len), \
 				  (struct nlmsghdr*)(((char*)(nlh)) + NLMSG_ALIGN((nlh)->nlmsg_len)))
 #define NLMSG_OK(nlh,len) ((len) >= (int)sizeof(struct nlmsghdr) && \
 			   (nlh)->nlmsg_len >= sizeof(struct nlmsghdr) && \
 			   (nlh)->nlmsg_len <= (len))
+	//查看了下这个宏的使用场景...netlink的消息封装有时候是netlink header + protocol header + payload..
+	//eg: #define RTM_PAYLOAD(n) NLMSG_PAYLOAD(n,sizeof(struct rtmsg))
+	//就是得到去掉netlink header 和 rtmsg的长度...得到实际中的payload的长度了..!!!
 #define NLMSG_PAYLOAD(nlh,len) ((nlh)->nlmsg_len - NLMSG_SPACE((len)))
 
 #define NLMSG_NOOP		0x1	/* Nothing.		*/
@@ -122,7 +140,7 @@ enum {
  *  <------- NLA_HDRLEN ------> <-- NLA_ALIGN(payload)-->
  * +---------------------+- - -+- - - - - - - - - -+- - -+
  * |        Header       | Pad |     Payload       | Pad |
- * |   (struct nlattr)   | ing |                   | ing |
+ * |   (struct nlattr)  | ing  |                         | ing  |
  * +---------------------+- - -+- - - - - - - - - -+- - -+
  *  <-------------- nlattr->nla_len -------------->
  */
@@ -160,11 +178,15 @@ static inline struct nlmsghdr *nlmsg_hdr(const struct sk_buff *skb)
 {
 	return (struct nlmsghdr *)skb->data;
 }
-
+/*
+	作为skb里面的CB.
+*/
 struct netlink_skb_parms
 {
 	struct ucred		creds;		/* Skb credentials	*/
+		//发送者的pid号.
 	__u32			pid;
+		//接受该skb数据包的组.
 	__u32			dst_group;
 	kernel_cap_t		eff_cap;
 	__u32			loginuid;	/* Login (audit) uid */
@@ -248,7 +270,9 @@ __nlmsg_put(struct sk_buff *skb, u32 pid, u32 seq, int type, int len, int flags)
 		memset(NLMSG_DATA(nlh) + len, 0, NLMSG_ALIGN(size) - size);
 	return nlh;
 }
-
+/*
+创建一个netlink的消息....会先判断skb的空间(tailroom)是否可以容纳netlink消息..(判断)
+*/
 #define NLMSG_NEW(skb, pid, seq, type, len, flags) \
 ({	if (unlikely(skb_tailroom(skb) < (int)NLMSG_SPACE(len))) \
 		goto nlmsg_failure; \

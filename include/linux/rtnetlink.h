@@ -265,22 +265,22 @@ enum rt_class_t
 
 enum rtattr_type_t
 {
-	RTA_UNSPEC,
-	RTA_DST,
-	RTA_SRC,
-	RTA_IIF,
-	RTA_OIF,
-	RTA_GATEWAY,
-	RTA_PRIORITY,
-	RTA_PREFSRC,
-	RTA_METRICS,
-	RTA_MULTIPATH,
-	RTA_PROTOINFO, /* no longer used */
-	RTA_FLOW,
-	RTA_CACHEINFO,
-	RTA_SESSION, /* no longer used */
-	RTA_MP_ALGO, /* no longer used */
-	RTA_TABLE,
+	RTA_UNSPEC,		// 0
+	RTA_DST,		// 1
+	RTA_SRC,		// 2
+	RTA_IIF,			// 3
+	RTA_OIF,			// 4
+	RTA_GATEWAY,	// 5
+	RTA_PRIORITY,	// 6
+	RTA_PREFSRC,	// 7
+	RTA_METRICS,	// 8
+	RTA_MULTIPATH,	// 9
+	RTA_PROTOINFO, /* no longer used */	// 10
+	RTA_FLOW,		// 11
+	RTA_CACHEINFO,	// 12
+	RTA_SESSION, /* no longer used */	// 13
+	RTA_MP_ALGO, /* no longer used */	// 14
+	RTA_TABLE,		// 15
 	__RTA_MAX
 };
 

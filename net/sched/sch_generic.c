@@ -130,6 +130,7 @@ static inline int qdisc_restart(struct Qdisc *q)
 	struct sk_buff *skb;
 
 	/* Dequeue packet */
+	//从队列上取下一个要发送的数据包.
 	if (unlikely((skb = dequeue_skb(q)) == NULL))
 		return 0;
 
@@ -142,6 +143,7 @@ static inline int qdisc_restart(struct Qdisc *q)
 	txq = netdev_get_tx_queue(dev, skb_get_queue_mapping(skb));
 
 	HARD_TX_LOCK(dev, txq, smp_processor_id());
+	//调用dev_hard_start_xmit吧数据包通过实际的链路发送出去...
 	if (!netif_tx_queue_stopped(txq) &&
 	    !netif_tx_queue_frozen(txq))
 		ret = dev_hard_start_xmit(skb, dev, txq);

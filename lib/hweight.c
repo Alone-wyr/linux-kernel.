@@ -8,7 +8,13 @@
  *
  * The Hamming Weight of a number is the total number of bits set in it.
  */
-
+/*
+计算unsigned int类型的参数中bit置位的数目..
+	w		return value
+eg:	2(01)	1
+	3(11)	2
+	7(111)	3
+*/
 unsigned int hweight32(unsigned int w)
 {
 	unsigned int res = w - ((w >> 1) & 0x55555555);

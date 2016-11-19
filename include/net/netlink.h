@@ -587,12 +587,11 @@ static inline void nlmsg_free(struct sk_buff *skb)
  * nlmsg_multicast - multicast a netlink message
  * @sk: netlink socket to spread messages to
  * @skb: netlink message as socket buffer
- * @pid: own netlink pid to avoid sending to yourself
+ * @pid: own netlink pid to avoid sending to yourself	发送这个消息的pid号...避免发送给自己拉.
  * @group: multicast group id
  * @flags: allocation flags
  */
-static inline int nlmsg_multicast(struct sock *sk, struct sk_buff *skb,
-				  u32 pid, unsigned int group, gfp_t flags)
+static inline int nlmsg_multicast(struct sock *sk, struct sk_buff *skb, u32 pid, unsigned int group, gfp_t flags)
 {
 	int err;
 

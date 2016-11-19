@@ -308,7 +308,8 @@ void rtmsg_fib(int event, __be32 key, struct fib_alias *fa,
 	struct sk_buff *skb;
 	u32 seq = info->nlh ? info->nlh->nlmsg_seq : 0;
 	int err = -ENOBUFS;
-
+	//为skb的data区分配内存,这里分配了最大可能的data大小...
+	//在下面fib_dump_info会动态的调整..
 	skb = nlmsg_new(fib_nlmsg_size(fa->fa_info), GFP_KERNEL);
 	if (skb == NULL)
 		goto errout;
@@ -322,8 +323,7 @@ void rtmsg_fib(int event, __be32 key, struct fib_alias *fa,
 		kfree_skb(skb);
 		goto errout;
 	}
-	rtnl_notify(skb, info->nl_net, info->pid, RTNLGRP_IPV4_ROUTE,
-		    info->nlh, GFP_KERNEL);
+	rtnl_notify(skb, info->nl_net, info->pid, RTNLGRP_IPV4_ROUTE, info->nlh, GFP_KERNEL);
 	return;
 errout:
 	if (err < 0)
@@ -1026,6 +1026,7 @@ int fib_dump_info(struct sk_buff *skb, u32 pid, u32 seq, int event,
 		nla_nest_end(skb, mp);
 	}
 #endif
+	//这里会在调整nlmsg_len的长度...返回skb->len..
 	return nlmsg_end(skb, nlh);
 
 nla_put_failure:

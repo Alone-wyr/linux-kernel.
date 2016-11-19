@@ -1673,8 +1673,7 @@ static int dev_gso_segment(struct sk_buff *skb)
 	return 0;
 }
 
-int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
-			struct netdev_queue *txq)
+int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev, struct netdev_queue *txq)
 {
 	const struct net_device_ops *ops = dev->netdev_ops;
 	int rc;
@@ -1807,9 +1806,7 @@ int dev_queue_xmit(struct sk_buff *skb)
     //pskb_may_pull的作用就是检测skb对应的主buf中是否有足够的空间来pull出len长度，     
     //如果不够就重新分配skb并将frags中的数据拷贝入新分配的主buff中，而这里将参数len设置为skb->datalen，     
     //也就是会将所有的数据全部拷贝到主buff中，以这种方式完成skb的线性化   
-	if (skb_shinfo(skb)->frag_list &&
-	    !(dev->features & NETIF_F_FRAGLIST) &&
-	    __skb_linearize(skb))
+	if (skb_shinfo(skb)->frag_list && !(dev->features & NETIF_F_FRAGLIST) && __skb_linearize(skb))
 		goto out_kfree_skb;
 
 	/* Fragmented skb is linearized if device does not support SG,
@@ -1875,7 +1872,7 @@ gso:
 
 	/* The device has no queue. Common case for software devices:
 	   loopback, all the sorts of tunnels...
-
+	   这个设备没有队列....通常是回环设备....或者各种各样的隧道..
 	   Really, it is unlikely that netif_tx_lock protection is necessary
 	   here.  (f.e. loopback and IP tunnels are clean ignoring statistics
 	   counters.)
@@ -1910,14 +1907,12 @@ gso:
 			}
 			HARD_TX_UNLOCK(dev, txq);
 			if (net_ratelimit())
-				printk(KERN_CRIT "Virtual device %s asks to "
-				       "queue packet!\n", dev->name);
+				printk(KERN_CRIT "Virtual device %s asks to queue packet!\n", dev->name);
 		} else {
 			/* Recursion is detected! It is possible,
 			 * unfortunately */
 			if (net_ratelimit())
-				printk(KERN_CRIT "Dead loop on virtual device "
-				       "%s, fix it urgently!\n", dev->name);
+				printk(KERN_CRIT "Dead loop on virtual device %s, fix it urgently!\n", dev->name);
 		}
 	}
 
@@ -4803,17 +4798,20 @@ static void netdev_init_queues(struct net_device *dev)
 
 /**
  *	alloc_netdev_mq - allocate network device
+ 		为private data 分配空间的大小.
  *	@sizeof_priv:	size of private data to allocate space for
+ 		设备的名称.
  *	@name:		device name format string
+ 		初始化设备的回调函数.
  *	@setup:		callback to initialize device
+ 		分配子队列的数目.
  *	@queue_count:	the number of subqueues to allocate
  *
  *	Allocates a struct net_device with private data area for driver use
  *	and performs basic initialization.  Also allocates subquue structs
  *	for each queue on the device at the end of the netdevice.
  */
-struct net_device *alloc_netdev_mq(int sizeof_priv, const char *name,
-		void (*setup)(struct net_device *), unsigned int queue_count)
+struct net_device *alloc_netdev_mq(int sizeof_priv, const char *name, void (*setup)(struct net_device *), unsigned int queue_count)
 {
 	struct netdev_queue *tx;
 	struct net_device *dev;
@@ -4824,6 +4822,7 @@ struct net_device *alloc_netdev_mq(int sizeof_priv, const char *name,
 
 	alloc_size = sizeof(struct net_device);
 	if (sizeof_priv) {
+		//如果需要为private data 分配空间...这里加上到alloc_size...
 		/* ensure 32-byte alignment of private area */
 		alloc_size = (alloc_size + NETDEV_ALIGN_CONST) & ~NETDEV_ALIGN_CONST;
 		alloc_size += sizeof_priv;
@@ -4844,9 +4843,9 @@ struct net_device *alloc_netdev_mq(int sizeof_priv, const char *name,
 		kfree(p);
 		return NULL;
 	}
-
-	dev = (struct net_device *)
-		(((long)p + NETDEV_ALIGN_CONST) & ~NETDEV_ALIGN_CONST);
+	//分配的空间是从p开始的...这里就为了让struct net_device放在NETDEV_ALIGN_CONST对齐的地址..
+	//然后padded就记录了..填充的大小咯..
+	dev = (struct net_device *) (((long)p + NETDEV_ALIGN_CONST) & ~NETDEV_ALIGN_CONST);
 	dev->padded = (char *)dev - (char *)p;
 	dev_net_set(dev, &init_net);
 
@@ -4859,6 +4858,7 @@ struct net_device *alloc_netdev_mq(int sizeof_priv, const char *name,
 	netdev_init_queues(dev);
 
 	INIT_LIST_HEAD(&dev->napi_list);
+	//接着调用回调函数啦~~
 	setup(dev);
 	strcpy(dev->name, name);
 	return dev;

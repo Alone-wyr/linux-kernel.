@@ -37,7 +37,12 @@ extern const char linux_proc_banner[];
 #define ULLONG_MAX	(~0ULL)
 
 #define STACK_MAGIC	0xdeadbeef
-
+/*
+ALIGN就是用来对齐作用的(向上对比)
+				返回结果.
+eg:	ALIGN(5, 8)	8
+	ALIGN(15, 8)	16
+*/
 #define ALIGN(x,a)		__ALIGN_MASK(x,(typeof(x))(a)-1)
 #define __ALIGN_MASK(x,mask)	(((x)+(mask))&~(mask))
 #define PTR_ALIGN(p, a)		((typeof(p))ALIGN((unsigned long)(p), (a)))

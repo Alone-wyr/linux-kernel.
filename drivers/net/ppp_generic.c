@@ -79,11 +79,15 @@ struct ppp_file {
 	enum {
 		INTERFACE=1, CHANNEL
 	}		kind;
+		//发送和接收队列...
 	struct sk_buff_head xq;		/* pppd transmit queue */
 	struct sk_buff_head rq;		/* receive queue for pppd */
 	wait_queue_head_t rwait;	/* for poll on reading /dev/ppp */
 	atomic_t	refcnt;		/* # refs (incl /dev/ppp attached) */
+		//发送数据包的时候..留个header的空间大小....
+		//也就是调用write函数的时候...为skb->data分配的空间是hdrlen + len(实际数据长度)
 	int		hdrlen;		/* space to leave for headers */
+		//接口或是通道的编号..
 	int		index;		/* interface unit / channel number */
 	int		dead;		/* unit/channel has been shut down */
 };
@@ -409,13 +413,18 @@ static ssize_t ppp_read(struct file *file, char __user *buf,
 
 	if (!pf)
 		return -ENXIO;
+	//加入到等待队列...需要注意只是假如到等待队列....
 	add_wait_queue(&pf->rwait, &wait);
 	for (;;) {
+		//设置进程状态....
 		set_current_state(TASK_INTERRUPTIBLE);
+		//尝试从rq返回数据包....rq(receive queue)..
 		skb = skb_dequeue(&pf->rq);
 		if (skb)
 			break;
+		//来到这里就是没有数据包可以读当前...
 		ret = 0;
+		//如果通道已经关闭...
 		if (pf->dead)
 			break;
 		if (pf->kind == INTERFACE) {
@@ -425,18 +434,29 @@ static ssize_t ppp_read(struct file *file, char __user *buf,
 			 * network traffic (demand mode).
 			 */
 			struct ppp *ppp = PF_TO_PPP(pf);
-			if (ppp->n_channels == 0
-			    && (ppp->flags & SC_LOOP_TRAFFIC) == 0)
+			/*	
+				网络接口类型但是没有连接任何通道...想要从该网络接口读取数据...那就返回0.
+				除非该网路接口设置了SC_LOOP_TRAFFIC标记...此时就算没有连接通道也不要紧~
+			*/
+			if (ppp->n_channels == 0 && (ppp->flags & SC_LOOP_TRAFFIC) == 0)
 				break;
 		}
 		ret = -EAGAIN;
+		//如果读取设置了非阻塞...那几退出...
 		if (file->f_flags & O_NONBLOCK)
 			break;
 		ret = -ERESTARTSYS;
 		if (signal_pending(current))
 			break;
+		//这里进行调度....因为是阻塞的读取数据..但是目前没有数据,,那就调度到其他进程咯..
+		//需要注意的是这里调度的过程... 
+		// 1. 加入到等待队列.
+		// 2.设置进程的状态.
+		// 3.调度到其他进程.
 		schedule();
+		//从该函数可以返回..代表该进程重新获得了执行..要么有数据可以read的了..要么是收到了退出等待的信号了
 	}
+	//到了这里...可能读取到数据也可能读取不到数据..但是调用read函数是要返回的了..
 	set_current_state(TASK_RUNNING);
 	remove_wait_queue(&pf->rwait, &wait);
 
@@ -470,13 +490,16 @@ static ssize_t ppp_write(struct file *file, const char __user *buf,
 	skb = alloc_skb(count + pf->hdrlen, GFP_KERNEL);
 	if (!skb)
 		goto out;
+	//预留前面的空间个header...
+	//此时data 和 tail都指向要装实际数据的地址.
 	skb_reserve(skb, pf->hdrlen);
 	ret = -EFAULT;
+	//从用户层拷贝数据...
 	if (copy_from_user(skb_put(skb, count), buf, count)) {
 		kfree_skb(skb);
 		goto out;
 	}
-
+	//把数据包放到发送队列..
 	skb_queue_tail(&pf->xq, skb);
 
 	switch (pf->kind) {
@@ -568,8 +591,7 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	int __user *p = argp;
 
 	if (!pf)
-		return ppp_unattached_ioctl(current->nsproxy->net_ns,
-					pf, file, cmd, arg);
+		return ppp_unattached_ioctl(current->nsproxy->net_ns, pf, file, cmd, arg);
 
 	if (cmd == PPPIOCDETACH) {
 		/*
@@ -788,8 +810,7 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return err;
 }
 
-static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
-			struct file *file, unsigned int cmd, unsigned long arg)
+static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf, struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int unit, err = -EFAULT;
 	struct ppp *ppp;
@@ -803,12 +824,15 @@ static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
 		/* Create a new ppp unit */
 		if (get_user(unit, p))
 			break;
+		//创建网络接口...因此ppp->file->kind就是INTERFACE的类型..
 		ppp = ppp_create_interface(net, unit, &err);
 		if (!ppp)
 			break;
+		//把设备文件和网络接口关联一起拉.~~
 		file->private_data = &ppp->file;
 		ppp->owner = file;
 		err = -EFAULT;
+		//返回给用户空间为该网络接口分配的编号..
 		if (put_user(ppp->file.index, p))
 			break;
 		err = 0;
@@ -851,7 +875,9 @@ static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
 	unlock_kernel();
 	return err;
 }
-
+/*
+作为/dev/ppp字符设备的文件操作集合啦~~
+*/
 static const struct file_operations ppp_device_fops = {
 	.owner		= THIS_MODULE,
 	.read		= ppp_read,
@@ -977,6 +1003,9 @@ ppp_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	/* Put the 2-byte PPP protocol number on the front,
 	   making sure there is room for the address and control fields. */
+	   /*
+	   	确保有足够的空间来保存address和control fields..!
+	   */
 	if (skb_cow_head(skb, PPP_HDRLEN))
 		goto outf;
 
@@ -1038,7 +1067,10 @@ ppp_net_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 
 	return err;
 }
-
+/*
+ndo_start_xmit发送数据的时候调用...由TCP/IP调用咯.!!!对的在函数dev_hard_start_xmit中调用..
+ndo_do_ioctl对网络接口调用ioctl函数时候调用.
+*/
 static const struct net_device_ops ppp_netdev_ops = {
 	.ndo_start_xmit = ppp_start_xmit,
 	.ndo_do_ioctl   = ppp_net_ioctl,
@@ -1072,8 +1104,7 @@ ppp_xmit_process(struct ppp *ppp)
 	ppp_xmit_lock(ppp);
 	if (!ppp->closing) {
 		ppp_push(ppp);
-		while (!ppp->xmit_pending
-		       && (skb = skb_dequeue(&ppp->file.xq)))
+		while (!ppp->xmit_pending && (skb = skb_dequeue(&ppp->file.xq)))
 			ppp_send_frame(ppp, skb);
 		/* If there's no work left to do, tell the core net
 		   code that we can accept some more. */
@@ -1180,8 +1211,7 @@ ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
 		if (!ppp->vj || (ppp->flags & SC_COMP_TCP) == 0)
 			break;
 		/* try to do VJ TCP header compression */
-		new_skb = alloc_skb(skb->len + ppp->dev->hard_header_len - 2,
-				    GFP_ATOMIC);
+		new_skb = alloc_skb(skb->len + ppp->dev->hard_header_len - 2,  GFP_ATOMIC);
 		if (!new_skb) {
 			printk(KERN_ERR "PPP: no memory (VJ comp pkt)\n");
 			goto drop;
@@ -1236,7 +1266,10 @@ ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
 	if (ppp->flags & SC_LOOP_TRAFFIC) {
 		if (ppp->file.rq.qlen > PPP_MAX_RQLEN)
 			goto drop;
+		//本来是要发送数据包的...但是因为网络设备标记SC_LOOP_TRAFFIC
+		//把本来要发送的数据包换成了接受的数据包...
 		skb_queue_tail(&ppp->file.rq, skb);
+		//唤醒阻塞调用read的函数的程序...就是阻塞读取/dev/ppp咯..
 		wake_up_interruptible(&ppp->file.rwait);
 		return;
 	}
@@ -1265,6 +1298,7 @@ ppp_push(struct ppp *ppp)
 		return;
 
 	list = &ppp->channels;
+	//获取发送数据包的发送通道...如果没有通道..那就退出吧...
 	if (list_empty(list)) {
 		/* nowhere to send the packet, just drop it */
 		ppp->xmit_pending = NULL;
@@ -1279,6 +1313,7 @@ ppp_push(struct ppp *ppp)
 
 		spin_lock_bh(&pch->downl);
 		if (pch->chan) {
+			//获取通道..然后发送出去....
 			if (pch->chan->ops->start_xmit(pch->chan, skb))
 				ppp->xmit_pending = NULL;
 		} else {
@@ -1529,9 +1564,11 @@ ppp_channel_push(struct channel *pch)
 	struct ppp *ppp;
 
 	spin_lock_bh(&pch->downl);
+	//之前有调用ppp_register_channel函数...设置了实际channel...
 	if (pch->chan) {
 		while (!skb_queue_empty(&pch->file.xq)) {
 			skb = skb_dequeue(&pch->file.xq);
+			//取出数据包并发送...
 			if (!pch->chan->ops->start_xmit(pch->chan, skb)) {
 				/* put the packet back and try again later */
 				skb_queue_head(&pch->file.xq, skb);
@@ -1540,10 +1577,14 @@ ppp_channel_push(struct channel *pch)
 		}
 	} else {
 		/* channel got deregistered */
+		//通道已经撤销掉了...此时应该把待发送的数据包全部给free掉.
 		skb_queue_purge(&pch->file.xq);
 	}
 	spin_unlock_bh(&pch->downl);
 	/* see if there is anything from the attached unit to be sent */
+	/*
+	这个函数是channel的发送函数...在返回的最后...会去判断一下这个channel所属的unit是否有数据包要发送.
+	*/
 	if (skb_queue_empty(&pch->file.xq)) {
 		read_lock_bh(&pch->upl);
 		ppp = pch->ppp;
@@ -2115,8 +2156,12 @@ int ppp_register_net_channel(struct net *net, struct ppp_channel *chan)
 		return -ENOMEM;
 
 	pn = ppp_pernet(net);
-
+	//新注册的channe..不属于任何unit.
 	pch->ppp = NULL;
+	//***这里应该是一个重要的过程..虽然对channel不太了解,,这个函数是一个通用函数..
+	//注册channel都是调用该函数，而chan是唯一的参数..显然因为这个参数才会是不同的channel...
+	//那么我猜测它是描述硬件通道的结构体吧..而且chanle ops是保存在struct ppp_channel里面的.
+	//那就是struct channel是ppp_channel高层(high-level)封装...
 	pch->chan = chan;
 	pch->chan_net = net;
 	chan->ppp = pch;
@@ -2521,8 +2566,7 @@ ppp_get_stats(struct ppp *ppp, struct ppp_stats *st)
  * or if there is already a unit with the requested number.
  * unit == -1 means allocate a new number.
  */
-static struct ppp *
-ppp_create_interface(struct net *net, int unit, int *retp)
+static struct ppp * ppp_create_interface(struct net *net, int unit, int *retp)
 {
 	struct ppp *ppp;
 	struct ppp_net *pn;
@@ -2543,7 +2587,9 @@ ppp_create_interface(struct net *net, int unit, int *retp)
 	ppp->file.hdrlen = PPP_HDRLEN - 2;	/* don't count proto bytes */
 	for (i = 0; i < NUM_NP; ++i)
 		ppp->npmode[i] = NPMODE_PASS;
+		//一个网络接口可以有多个通道..这里是通道的链表啦.
 	INIT_LIST_HEAD(&ppp->channels);
+		//接受队列锁和发送队列锁初始化.
 	spin_lock_init(&ppp->rlock);
 	spin_lock_init(&ppp->wlock);
 #ifdef CONFIG_PPP_MULTILINK
@@ -2757,8 +2803,11 @@ ppp_connect_channel(struct channel *pch, int unit)
 	hdrlen = pch->file.hdrlen + 2;	/* for protocol bytes */
 	if (hdrlen > ppp->dev->hard_header_len)
 		ppp->dev->hard_header_len = hdrlen;
+	//	把通道和unit关联一起...
 	list_add_tail(&pch->clist, &ppp->channels);
+	//	一个unit可以有多个channel..这里记录channel的数目.
 	++ppp->n_channels;
+	//channel所属的unit...
 	pch->ppp = ppp;
 	atomic_inc(&ppp->file.refcnt);
 	ppp_unlock(ppp);

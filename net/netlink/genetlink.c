@@ -133,8 +133,7 @@ static struct genl_multicast_group notify_grp;
  * @family: The generic netlink family the group shall be registered for.
  * @grp: The group to register, must have a name.
  */
-int genl_register_mc_group(struct genl_family *family,
-			   struct genl_multicast_group *grp)
+int genl_register_mc_group(struct genl_family *family, struct genl_multicast_group *grp)
 {
 	int id;
 	unsigned long *new_groups;
@@ -148,8 +147,7 @@ int genl_register_mc_group(struct genl_family *family,
 	if (grp == &notify_grp)
 		id = GENL_ID_CTRL;
 	else
-		id = find_first_zero_bit(mc_groups,
-					 mc_groups_longs * BITS_PER_LONG);
+		id = find_first_zero_bit(mc_groups, mc_groups_longs * BITS_PER_LONG);
 
 
 	if (id >= mc_groups_longs * BITS_PER_LONG) {
@@ -175,8 +173,7 @@ int genl_register_mc_group(struct genl_family *family,
 		mc_groups_longs++;
 	}
 
-	err = netlink_change_ngroups(genl_sock,
-				     mc_groups_longs * BITS_PER_LONG);
+	err = netlink_change_ngroups(genl_sock, mc_groups_longs * BITS_PER_LONG);
 	if (err)
 		goto out;
 
@@ -327,7 +324,9 @@ int genl_unregister_ops(struct genl_family *family, struct genl_ops *ops)
 int genl_register_family(struct genl_family *family)
 {
 	int err = -EINVAL;
-
+	/*
+		自定义的ID号不可以应该在(GENL_MIN_ID, GENL_MAX_ID)区间..
+	*/
 	if (family->id && family->id < GENL_MIN_ID)
 		goto errout;
 
@@ -338,7 +337,9 @@ int genl_register_family(struct genl_family *family)
 	INIT_LIST_HEAD(&family->mcast_groups);
 
 	genl_lock();
-
+	/*
+		所有的family的ID号和name应该是唯一的..
+	*/
 	if (genl_family_find_byname(family->name)) {
 		err = -EEXIST;
 		goto errout_locked;
@@ -348,7 +349,7 @@ int genl_register_family(struct genl_family *family)
 		err = -EEXIST;
 		goto errout_locked;
 	}
-
+	//如果id设置为GENL_ID_GENERATE，那就是需要内核来为该family分配一个id号.
 	if (family->id == GENL_ID_GENERATE) {
 		u16 newid = genl_generate_id();
 
@@ -361,15 +362,14 @@ int genl_register_family(struct genl_family *family)
 	}
 
 	if (family->maxattr) {
-		family->attrbuf = kmalloc((family->maxattr+1) *
-					sizeof(struct nlattr *), GFP_KERNEL);
+		family->attrbuf = kmalloc((family->maxattr+1) * sizeof(struct nlattr *), GFP_KERNEL);
 		if (family->attrbuf == NULL) {
 			err = -ENOMEM;
 			goto errout_locked;
 		}
 	} else
 		family->attrbuf = NULL;
-
+	//添加到链表....family_ht为一个hash,,一共有16个bucket...
 	list_add_tail(&family->family_list, genl_family_chain(family->id));
 	genl_unlock();
 
@@ -490,8 +490,7 @@ static struct genl_family genl_ctrl = {
 	.maxattr = CTRL_ATTR_MAX,
 };
 
-static int ctrl_fill_info(struct genl_family *family, u32 pid, u32 seq,
-			  u32 flags, struct sk_buff *skb, u8 cmd)
+static int ctrl_fill_info(struct genl_family *family, u32 pid, u32 seq,  u32 flags, struct sk_buff *skb, u8 cmd)
 {
 	void *hdr;
 
@@ -630,8 +629,7 @@ errout:
 	return skb->len;
 }
 
-static struct sk_buff *ctrl_build_family_msg(struct genl_family *family,
-					     u32 pid, int seq, u8 cmd)
+static struct sk_buff *ctrl_build_family_msg(struct genl_family *family, u32 pid, int seq, u8 cmd)
 {
 	struct sk_buff *skb;
 	int err;
@@ -708,7 +706,10 @@ static int ctrl_getfamily(struct sk_buff *skb, struct genl_info *info)
 errout:
 	return err;
 }
-
+/*
+NETLINK_GENERIC  protocol有事件发生的时候由genl_sock发送一个多播消息出去...
+dst_group设置为genl_ctrl这个family的type号GENL_ID_CTRL。
+*/
 static int genl_ctrl_event(int event, void *data)
 {
 	struct sk_buff *msg;
@@ -755,11 +756,11 @@ static int __init genl_init(void)
 
 	for (i = 0; i < GENL_FAM_TAB_SIZE; i++)
 		INIT_LIST_HEAD(&family_ht[i]);
-
+	//注册family, id = GENL_ID_CTRL.
 	err = genl_register_family(&genl_ctrl);
 	if (err < 0)
 		goto errout;
-
+	//为family注册操作函数...
 	err = genl_register_ops(&genl_ctrl, &genl_ctrl_ops);
 	if (err < 0)
 		goto errout_register;
@@ -767,11 +768,13 @@ static int __init genl_init(void)
 	netlink_set_nonroot(NETLINK_GENERIC, NL_NONROOT_RECV);
 
 	/* we'll bump the group number right afterwards */
-	genl_sock = netlink_kernel_create(&init_net, NETLINK_GENERIC, 0,
-					  genl_rcv, &genl_mutex, THIS_MODULE);
+	//创建protocol为NETLINK_GENERIC..groups为0..代表说不可以组播...不支持任何socket来监听组的消息...
+	genl_sock = netlink_kernel_create(&init_net, NETLINK_GENERIC, 0,  genl_rcv, &genl_mutex, THIS_MODULE);
 	if (genl_sock == NULL)
 		panic("GENL: Cannot initialize generic netlink\n");
-
+	//这里是让family注册到组播...意思就是让protocol支持socket来监听id指定的组播号.
+	//这里的id = GENL_ID_CTRL....
+	//它不像其他的protocol..在创建的时候就指定了可以监听的组的数目..而是动态的变化了...
 	err = genl_register_mc_group(&genl_ctrl, &notify_grp);
 	if (err < 0)
 		goto errout_register;

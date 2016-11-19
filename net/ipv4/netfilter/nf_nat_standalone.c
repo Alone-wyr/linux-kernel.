@@ -126,7 +126,7 @@ nf_nat_fn(unsigned int hooknum,
 		/*
 			新建的连接..那么就是NEW...此时需要到nat 表 postrouting链上走一趟...
 			判断是不是需要进行SNAT/DNAT/MASQUERADE处理....
-			需要特别注意!!只有在新的连接上...后续的数据包则直接进行处理..不会在去postrouting上走一趟了..!!!!
+			需要特别注意!!只有在新的连接上...后续的数据包则直接进行处理..不会在去prerouting/postrouing上走一趟了..!!!!
 		*/
 		/* Seen it before?  This can happen for loopback, retrans,  or local packets.. */
 		if (!nf_nat_initialized(ct, maniptype)) {

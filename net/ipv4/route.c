@@ -1193,7 +1193,7 @@ restart:
 		}
 	}
 
-	//在这里就是添加路由表项到路由缓存表, 1
+	//(1)  在这里就是添加路由表项到路由缓存表,
 	rt->u.dst.rt_next = rt_hash_table[hash].chain;
 
 #if RT_CACHE_DEBUG >= 2
@@ -1210,11 +1210,12 @@ restart:
 	 * previous writes to rt are comitted to memory
 	 * before making rt visible to other CPUS.
 	 */
-	 //在这里就是添加路由表项到路由缓存表, 2
-	 //由这2步完成往链表里面添加结点.
+	 //(2) 在这里就是添加路由表项到路由缓存表
+	 //由这2步完成往链表里面添加结点.而且是添加到chain的头里面.
 	rcu_assign_pointer(rt_hash_table[hash].chain, rt);
 
 	spin_unlock_bh(rt_hash_lock_addr(hash));
+	//这里就是设置skb(数据包)的路由啦.
 	*rp = rt;
 	return 0;
 }
@@ -2024,8 +2025,7 @@ static int ip_mkroute_input(struct sk_buff *skb,
 		return err;
 
 	/* put it into the cache */
-	hash = rt_hash(daddr, saddr, fl->iif,
-		       rt_genid(dev_net(rth->u.dst.dev)));
+	hash = rt_hash(daddr, saddr, fl->iif,  rt_genid(dev_net(rth->u.dst.dev)));
 	return rt_intern_hash(hash, rth, &skb->rtable);
 }
 

@@ -605,7 +605,9 @@ static int inet_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh, void *ar
 errout:
 	return err;
 }
-
+/*
+注册的netlink,,,在用户层使用的route add xxxxx   或者 ip route add xxxxxxx最后都是调用该函数啦.
+*/
 static int inet_rtm_newroute(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 {
 	struct net *net = sock_net(skb->sk);
@@ -720,6 +722,7 @@ void fib_add_ifaddr(struct in_ifaddr *ifa)
 	struct in_ifaddr *prim = ifa;
 	__be32 mask = ifa->ifa_mask;
 	__be32 addr = ifa->ifa_local;
+		//计算出网络地址.
 	__be32 prefix = ifa->ifa_address&mask;
 
 	if (ifa->ifa_flags&IFA_F_SECONDARY) {
@@ -729,23 +732,25 @@ void fib_add_ifaddr(struct in_ifaddr *ifa)
 			return;
 		}
 	}
-
+		//添加的就是主机路由....
 	fib_magic(RTM_NEWROUTE, RTN_LOCAL, addr, 32, prim);
 
 	if (!(dev->flags&IFF_UP))
 		return;
 
 	/* Add broadcast address, if it is explicitly assigned. */
+		//添加广播路由..
 	if (ifa->ifa_broadcast && ifa->ifa_broadcast != htonl(0xFFFFFFFF))
 		fib_magic(RTM_NEWROUTE, RTN_BROADCAST, ifa->ifa_broadcast, 32, prim);
 
-	if (!ipv4_is_zeronet(prefix) && !(ifa->ifa_flags&IFA_F_SECONDARY) &&
-	    (prefix != addr || ifa->ifa_prefixlen < 32)) {
-		fib_magic(RTM_NEWROUTE, dev->flags&IFF_LOOPBACK ? RTN_LOCAL :
-			  RTN_UNICAST, prefix, ifa->ifa_prefixlen, prim);
+	if (!ipv4_is_zeronet(prefix) && !(ifa->ifa_flags&IFA_F_SECONDARY) && (prefix != addr || ifa->ifa_prefixlen < 32)) {
+			//添加网络路由..
+		fib_magic(RTM_NEWROUTE, dev->flags&IFF_LOOPBACK ? RTN_LOCAL : RTN_UNICAST, prefix, ifa->ifa_prefixlen, prim);
 
 		/* Add network specific broadcasts, when it takes a sense */
 		if (ifa->ifa_prefixlen < 31) {
+			//添加广播路由...主机部分全为0和主机部分全为1的情况...
+			//有可能会和前面添加广播路由重叠..不过不要紧..不会重复添加!!
 			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix, 32, prim);
 			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix|~mask, 32, prim);
 		}

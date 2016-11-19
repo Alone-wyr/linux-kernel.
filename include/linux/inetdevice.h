@@ -22,6 +22,7 @@ struct in_device
 	struct net_device	*dev;
 	atomic_t		refcnt;
 	int			dead;
+		//一个接口可能有多个ip地址...构成链.
 	struct in_ifaddr	*ifa_list;	/* IP ifaddr chain		*/
 	rwlock_t		mc_list_lock;
 	struct ip_mc_list	*mc_list;	/* IP multicast filter chain    */
@@ -115,12 +116,16 @@ struct in_ifaddr
 	struct in_ifaddr	*ifa_next;
 	struct in_device	*ifa_dev;
 	struct rcu_head		rcu_head;
+		//如果没有隧道IP地址...ifa_local和ifa_address则是相同的.
 	__be32			ifa_local;
 	__be32			ifa_address;
+		//子网掩码.
 	__be32			ifa_mask;
+		//指定的广播地址..
 	__be32			ifa_broadcast;
 	unsigned char		ifa_scope;
 	unsigned char		ifa_flags;
+		//子网掩码中1的数目...它是可以通过ifa_mask计算出来的.
 	unsigned char		ifa_prefixlen;
 	char			ifa_label[IFNAMSIZ];
 };
@@ -210,6 +215,10 @@ static inline void in_dev_put(struct in_device *idev)
 
 #endif /* __KERNEL__ */
 
+//根据参数指定的掩码长度,...返回掩码值..
+//eg: logmask = 24, 则返回0xFFFFFF00
+//eg: logmask = 32, 则返回0xFFFFFFFF
+//eg: logmask = 23, 则返回0xFFFFFE00
 static __inline__ __be32 inet_make_mask(int logmask)
 {
 	if (logmask)

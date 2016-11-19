@@ -1278,11 +1278,20 @@ static int rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	/* All the messages must have at least 1 byte length */
 	if (nlh->nlmsg_len < NLMSG_LENGTH(sizeof(struct rtgenmsg)))
 		return 0;
-
+	//data区的数据一开始就是存放着rtgen_family咯...
+	//查看rtm_min数组就知道...每个RTM_NEWROUTE来说，传输过来的是下面格式:
+	//struct nlmsghdr + struct rtmsg + data...
 	family = ((struct rtgenmsg*)NLMSG_DATA(nlh))->rtgen_family;
 	if (family >= NPROTO)
 		return -EAFNOSUPPORT;
-
+	/*
+		下面的解析可以看出来...最后2bit来确定是哪种操作.
+		然后除去最后2bit的其他数据来确定是哪个类型..
+		比如说RTM_NEWROUTE = 24, RTM_DELROUTE = 25, RTM_GETROUTE = 26.   RTM_BASE = 16..需要减去该BASE来计算.
+			type= 8: 1000				9: 1001				10: 1010
+		    sz_idx = 2: 10				2: 10				 2 : 10		相等..代表他们是同一个type的.
+		    kind    = 0: 00				1: 01				 2 : 10		下面会对kink = 2进行特备处理..它是GET操作.
+	*/
 	sz_idx = type>>2;
 	kind = type&3;
 
@@ -1290,6 +1299,7 @@ static int rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		return -EPERM;
 
 	if (kind == 2 && nlh->nlmsg_flags&NLM_F_DUMP) {
+		//这里就是获取(GET)
 		struct sock *rtnl;
 		rtnl_dumpit_func dumpit;
 
@@ -1303,7 +1313,7 @@ static int rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		rtnl_lock();
 		return err;
 	}
-
+	//这里是设置(SET).
 	memset(rta_buf, 0, (rtattr_max * sizeof(struct rtattr *)));
 
 	min_len = rtm_min[sz_idx];
@@ -1311,6 +1321,7 @@ static int rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		return -EINVAL;
 
 	if (nlh->nlmsg_len > min_len) {
+		//解析数据包内的真正的数据...前面是2个头...一个是netlink的头,,一个是type的头..最后才是真正的data.
 		int attrlen = nlh->nlmsg_len - NLMSG_ALIGN(min_len);
 		struct rtattr *attr = (void*)nlh + NLMSG_ALIGN(min_len);
 
@@ -1324,11 +1335,11 @@ static int rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 			attr = RTA_NEXT(attr, attrlen);
 		}
 	}
-
+	//获取set函数..
 	doit = rtnl_get_doit(family, type);
 	if (doit == NULL)
 		return -EOPNOTSUPP;
-
+	//调用set函数..
 	return doit(skb, nlh, (void *)&rta_buf[0]);
 }
 
@@ -1372,8 +1383,7 @@ static struct notifier_block rtnetlink_dev_notifier = {
 static int rtnetlink_net_init(struct net *net)
 {
 	struct sock *sk;
-	sk = netlink_kernel_create(net, NETLINK_ROUTE, RTNLGRP_MAX,
-				   rtnetlink_rcv, &rtnl_mutex, THIS_MODULE);
+	sk = netlink_kernel_create(net, NETLINK_ROUTE, RTNLGRP_MAX, rtnetlink_rcv, &rtnl_mutex, THIS_MODULE);
 	if (!sk)
 		return -ENOMEM;
 	net->rtnl = sk;

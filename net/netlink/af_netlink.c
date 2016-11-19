@@ -60,7 +60,12 @@
 #include <net/sock.h>
 #include <net/scm.h>
 #include <net/netlink.h>
-
+/*
+一开始让x和4的倍数对齐(向上对比)..接着除以8...假设是占据1个bit...
+eg: 15个组..每个组占据一个bit...那么用2bytes(一共15bits)就可以描述每个组(0/1)..
+      但是这里是4字节对齐的..因此为4bytes返回.
+      33个组的话..就是返回8..
+*/
 #define NLGRPSZ(x)	(ALIGN(x, sizeof(unsigned long) * 8) / 8)
 #define NLGRPLONGS(x)	(NLGRPSZ(x)/sizeof(unsigned long))
 
@@ -113,9 +118,13 @@ struct nl_pid_hash {
 
 struct netlink_table {
 	struct nl_pid_hash hash;
+		//这个链表广播的时候用的....它链接的结点相当于是struct sock类型的.
 	struct hlist_head mc_list;
+		//这个和下面的groups字段是有联系的...这里的每个bit描述下面的每个组的情况...
+		//比如对于第3组来说...那就是bit2来判断..如果bit2位1..那说明至少又一个sock来监听该组的数据包...
 	unsigned long *listeners;
 	unsigned int nl_nonroot;
+		//记录这个table的组数目..也就是可供监听的组的数目咯..
 	unsigned int groups;
 	struct mutex *cb_mutex;
 	struct module *module;
@@ -356,8 +365,16 @@ static int netlink_insert(struct sock *sk, struct net *net, u32 pid)
 	}
 	if (node)
 		goto err;
-
+	/*
+		上面的作用就是遍历protocol下的struct sock..判断是不是有存在pid和当前要注册的pid一致的..如果一致的
+		那就不能够insert进去...相当于两个struct sock的family都是NETLINK...protocol也相同...同时pid也相同...那是不允许的..
+		我想这个pid...就有点类似TCP/UDP中的端口吧...
+	*/
 	err = -EBUSY;
+	/*
+		函数可以认为就是来判断pid是否可以添加到netlink里面...参数pid就是用来判断的...此时struct sock的pid应该是为0的..
+		判断完成之后，然后在后面会把参数pid赋值到struct sock里面去.
+	*/
 	if (nlk_sk(sk)->pid)
 		goto err;
 
@@ -400,7 +417,8 @@ static int __netlink_create(struct net *net, struct socket *sock,
 	struct netlink_sock *nlk;
 
 	sock->ops = &netlink_ops;
-
+	//需要注意的是...其实分配的是struct netlink_sock结构体.
+	//然后struct sock内置在里面...那就可以根据struct sock来得到struct netlink_sock.下面的函数nlk_sk就是实现该作用.
 	sk = sk_alloc(net, PF_NETLINK, GFP_KERNEL, &netlink_proto);
 	if (!sk)
 		return -ENOMEM;
@@ -575,7 +593,10 @@ static void
 netlink_update_subscriptions(struct sock *sk, unsigned int subscriptions)
 {
 	struct netlink_sock *nlk = nlk_sk(sk);
-
+/*
+nlk->subscriptions不等于0,,然后参数要设置为0...那就从绑定链表中删除掉.
+nlk->subscriptions等于0....然后参数要设置为非0..那就添加到绑定链表中..
+*/
 	if (nlk->subscriptions && !subscriptions)
 		__sk_del_bind_node(sk);
 	else if (!nlk->subscriptions && subscriptions)
@@ -606,8 +627,7 @@ static int netlink_realloc_groups(struct sock *sk)
 		err = -ENOMEM;
 		goto out_unlock;
 	}
-	memset((char *)new_groups + NLGRPSZ(nlk->ngroups), 0,
-	       NLGRPSZ(groups) - NLGRPSZ(nlk->ngroups));
+	memset((char *)new_groups + NLGRPSZ(nlk->ngroups), 0, NLGRPSZ(groups) - NLGRPSZ(nlk->ngroups));
 
 	nlk->groups = new_groups;
 	nlk->ngroups = groups;
@@ -616,8 +636,7 @@ static int netlink_realloc_groups(struct sock *sk)
 	return err;
 }
 
-static int netlink_bind(struct socket *sock, struct sockaddr *addr,
-			int addr_len)
+static int netlink_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 {
 	struct sock *sk = sock->sk;
 	struct net *net = sock_net(sk);
@@ -641,9 +660,10 @@ static int netlink_bind(struct socket *sock, struct sockaddr *addr,
 		if (nladdr->nl_pid != nlk->pid)
 			return -EINVAL;
 	} else {
-		err = nladdr->nl_pid ?
-			netlink_insert(sk, net, nladdr->nl_pid) :
-			netlink_autobind(sock);
+	//nlk->pid一般是为0啦...然后通过nl_pid设定的pid号来和struct netlink_sock绑定在一起.
+	//假设没有设置的话..调用netllink_autobind函数会设置当前进程的tgid作为pid号...pid = current->tgid;
+	//可以在想一想TCP/UDP中port是由内核自己分配咯...这里也自动分配..不过是用进程的tgid而已啦.
+		err = nladdr->nl_pid ? netlink_insert(sk, net, nladdr->nl_pid) : netlink_autobind(sock);
 		if (err)
 			return err;
 	}
@@ -652,9 +672,7 @@ static int netlink_bind(struct socket *sock, struct sockaddr *addr,
 		return 0;
 
 	netlink_table_grab();
-	netlink_update_subscriptions(sk, nlk->subscriptions +
-					 hweight32(nladdr->nl_groups) -
-					 hweight32(nlk->groups[0]));
+	netlink_update_subscriptions(sk, nlk->subscriptions + hweight32(nladdr->nl_groups) - hweight32(nlk->groups[0]));
 	nlk->groups[0] = (nlk->groups[0] & ~0xffffffffUL) | nladdr->nl_groups;
 	netlink_update_listeners(sk);
 	netlink_table_ungrab();
@@ -871,6 +889,9 @@ static inline int netlink_unicast_kernel(struct sock *sk, struct sk_buff *skb)
 	struct netlink_sock *nlk = nlk_sk(sk);
 
 	ret = -ECONNREFUSED;
+	/*
+		比如说对于protocol为NETLINK_ROUTE来说,,它调用的函数为rtnetlink_rcv....
+	*/
 	if (nlk->netlink_rcv != NULL) {
 		ret = skb->len;
 		skb_set_owner_r(skb, sk);
@@ -880,9 +901,22 @@ static inline int netlink_unicast_kernel(struct sock *sk, struct sk_buff *skb)
 	sock_put(sk);
 	return ret;
 }
+/*
+该函数在发送netlink消息的时候调用啦.比如说用户进程sendmsg给内核的struct netlink_sock或者是内核发送给消息给用户进程都调用该函数.
+在函数内部会区分这2种发送...
+使用struct netlink_sock->pid可以确定一个唯一的struct netlinkc_sock(类似于端口号)..内核的pid它设置为0.
+并且创建内核sturct netlink_sock的时候会让struct netlink_soco->flags打上NETLINK_KERNEL_SOCKET标记..记录它是内核socket.
+因此从用户进程发送给内核的消息，它会调用函数netlink_unicast_kernel来处理.
+而从内核发送消息给用户进程，它会调用函数netlink_sendskb.
 
-int netlink_unicast(struct sock *ssk, struct sk_buff *skb,
-		    u32 pid, int nonblock)
+参数nonblock用来判断是否等待...这里可以看到用户发送消息给内核，它的nonblock并没有使用..可以认为就是同步处理的..
+而内核发送消息给用户进程，它就可以选择是否等待...但是让内核去等待用户进程来处理消息,,,那也太不合理了吧?也许是
+使用在进程间通过netlink通信使用吧..
+
+此外...我觉得应该也是可以用户进程发送消息给用户进程的...虽然很少这么使用...进程间的通信机制方式可有很多..但是
+这个应该也算一个吧.~~~
+*/
+int netlink_unicast(struct sock *ssk, struct sk_buff *skb, u32 pid, int nonblock)
 {
 	struct sock *sk;
 	int err;
@@ -892,11 +926,15 @@ int netlink_unicast(struct sock *ssk, struct sk_buff *skb,
 
 	timeo = sock_sndtimeo(ssk, nonblock);
 retry:
+	//在tcp/udp中..通过port来区分不同的struct sock..而对于netlink来说，它是用pid来区分不同的strut sock..
+	//这用pid来找到同参数struct sock *ssk通信的sock...
 	sk = netlink_getsockbypid(ssk, pid);
 	if (IS_ERR(sk)) {
 		kfree_skb(skb);
 		return PTR_ERR(sk);
 	}
+	//找到的struct sock判断flag 是否有NETLINK_KERNEL_SOCKET标记...
+	//在注册netlink的protocol的时候都会创建一个sock，并且设置带NETLINK_KERNEL_SOCKET标记.
 	if (netlink_is_kernel(sk))
 		return netlink_unicast_kernel(sk, skb);
 
@@ -964,17 +1002,21 @@ struct netlink_broadcast_data {
 	struct sk_buff *skb, *skb2;
 };
 
-static inline int do_one_broadcast(struct sock *sk,
-				   struct netlink_broadcast_data *p)
+static inline int do_one_broadcast(struct sock *sk,  struct netlink_broadcast_data *p)
 {
 	struct netlink_sock *nlk = nlk_sk(sk);
 	int val;
 
 	if (p->exclude_sk == sk)
 		goto out;
-
-	if (nlk->pid == p->pid || p->group - 1 >= nlk->ngroups ||
-	    !test_bit(p->group - 1, nlk->groups))
+	/*
+		第一个判断条件是让消息不要发送给自己...后面2个判断是确定这个struct sock是不是要接受这个消息.
+		对于一个socket要接受一个组的消息..那它对应的bit要置位1..比如说要接受第3组的消息..那么groups的值应该为4(100)
+		或者说要同时接受第3组和第4组的消息..groups的值为12(1100).
+		而参数p->group代表该消息要发送给哪个组...因此判断的条件就是groups的group bit是不是置位...因为bit从0开始编号..因此会减1.
+	*/
+																//测试nlk->groups的p->group - 1位是不是为1.
+	if (nlk->pid == p->pid || p->group - 1 >= nlk->ngroups || !test_bit(p->group - 1, nlk->groups))
 		goto out;
 
 	if (!net_eq(sock_net(sk), p->net))
@@ -1022,8 +1064,7 @@ out:
 	return 0;
 }
 
-int netlink_broadcast(struct sock *ssk, struct sk_buff *skb, u32 pid,
-		      u32 group, gfp_t allocation)
+int netlink_broadcast(struct sock *ssk, struct sk_buff *skb, u32 pid, u32 group, gfp_t allocation)
 {
 	struct net *net = sock_net(ssk);
 	struct netlink_broadcast_data info;
@@ -1263,8 +1304,7 @@ static void netlink_cmsg_recv_pktinfo(struct msghdr *msg, struct sk_buff *skb)
 	put_cmsg(msg, SOL_NETLINK, NETLINK_PKTINFO, sizeof(info), &info);
 }
 
-static int netlink_sendmsg(struct kiocb *kiocb, struct socket *sock,
-			   struct msghdr *msg, size_t len)
+static int netlink_sendmsg(struct kiocb *kiocb, struct socket *sock, struct msghdr *msg, size_t len)
 {
 	struct sock_iocb *siocb = kiocb_to_siocb(kiocb);
 	struct sock *sk = sock->sk;
@@ -1296,7 +1336,10 @@ static int netlink_sendmsg(struct kiocb *kiocb, struct socket *sock,
 		dst_pid = nlk->dst_pid;
 		dst_group = nlk->dst_group;
 	}
-
+/*
+	应用层在给内核发消息的时候有可能没有调用bind函数..(这里的情景类似于应用程序就是客户端..内核就是服务器..TCP/UDP也有类似情景
+	那就是客户端端口是随机临时分配的).而netlink它不是断口..而是进程的tgid(随机分配)...
+*/
 	if (!nlk->pid) {
 		err = netlink_autobind(sock);
 		if (err)
@@ -1434,7 +1477,10 @@ netlink_kernel_create(struct net *net, int unit, unsigned int groups,
 
 	if (unit < 0 || unit >= MAX_LINKS)
 		return NULL;
-
+	//创建一个struct socket...并设置一些基本的参数.
+	//1. family设置为PF_NETLINK
+	//2. type = SOCK_DGRAM
+	//3. protocol = 具体根据netlink设置..eg: NETLINK_ROUTE
 	if (sock_create_lite(PF_NETLINK, SOCK_DGRAM, unit, &sock))
 		return NULL;
 
@@ -1443,7 +1489,8 @@ netlink_kernel_create(struct net *net, int unit, unsigned int groups,
 	 * get_net it. Besides, we cannot get and then put the net here.
 	 * So we create one inside init_net and the move it to net.
 	 */
-
+	//创建一个struct sock...并连接到struct socket...(需要知道的是..用户层调用socket函数的话也是分配struct socket和struct sock.)
+	//并设置struct socket的ops为netlink_ops....struct sock的proto为netlink_proto
 	if (__netlink_create(&init_net, sock, cb_mutex, unit) < 0)
 		goto out_sock_release_nosk;
 
@@ -1458,9 +1505,14 @@ netlink_kernel_create(struct net *net, int unit, unsigned int groups,
 		goto out_sock_release;
 
 	sk->sk_data_ready = netlink_data_ready;
+	//这里特别重要!!!它是一个netlink地址族里面，某个protol指定的接受函数...
+	//netlink地址族支持的protocol..都会调用一次该函数..同时会设置接收函数啦...
+	//比如说procol =NETLINK_ROUTE , 它的接受处理函数为rtnetlink_rcv
 	if (input)
 		nlk_sk(sk)->netlink_rcv = input;
-
+	//nl_table的分配过程，nl_table = kcalloc(MAX_LINKS, sizeof(*nl_table), GFP_KERNEL); 每种protocol占据一项.
+	//nl_table变量维护着系统netlink所有的struct sock...这里的话就是也要添加到nt_table...
+	//在添加进去时候需要判断师傅允许添加...
 	if (netlink_insert(sk, net, 0))
 		goto out_sock_release;
 
@@ -1468,6 +1520,9 @@ netlink_kernel_create(struct net *net, int unit, unsigned int groups,
 	nlk->flags |= NETLINK_KERNEL_SOCKET;
 
 	netlink_table_grab();
+	/*
+		registered是表示注册的次数...
+	*/
 	if (!nl_table[unit].registered) {
 		nl_table[unit].groups = groups;
 		nl_table[unit].listeners = listeners;
@@ -1728,12 +1783,13 @@ void netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh, int err)
 }
 EXPORT_SYMBOL(netlink_ack);
 
-int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *,
-						     struct nlmsghdr *))
+int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *,  struct nlmsghdr *))
 {
 	struct nlmsghdr *nlh;
 	int err;
-
+	//这边的循环条件是...宏的返回值是netlink消息的长度..其中参数是说明负载的大小(payload)..
+	//如果传递过去的为0..那返回的就是netlink消息头的长度.
+	//因此这里的循环条件就是...数据包的长度大于等于netlink消息头的长度的时候..
 	while (skb->len >= nlmsg_total_size(0)) {
 		int msglen;
 
@@ -1756,10 +1812,15 @@ int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *,
 			goto skip;
 
 ack:
+		//接受到消息的进程..返回处理结果给发送者...如果有打NLM_F_ACK标机..那就是处理每一个netlink消息都返回ack.
+		//否则只有在有错误发生(err != 0)的时候返回ack.
 		if (nlh->nlmsg_flags & NLM_F_ACK || err)
 			netlink_ack(skb, nlh, err);
 
 skip:
+		//这里说明的意思是...一个skb可能存放多个netlink消息...
+		//skb->data指向的空间,,每个netlink消息都包含头和数据..一个netlink消息长度(头和消息体)保存在nlmsg_len.
+		//因此这里就是处理完一个netlink消息了...让data指针pull到下一个消息..让skb->len减去处理的消息长度.
 		msglen = NLMSG_ALIGN(nlh->nlmsg_len);
 		if (msglen > skb->len)
 			msglen = skb->len;

@@ -49,20 +49,26 @@ static struct kmem_cache *fn_alias_kmem __read_mostly;
 struct fib_node {
 	struct hlist_node	fn_hash;
 	struct list_head	fn_alias;
+		//该node的网段值.
 	__be32			fn_key;
 	struct fib_alias        fn_embedded_alias;
 };
 
 struct fn_zone {
 	struct fn_zone		*fz_next;	/* Next not empty zone	*/
+		//用来链接node.
 	struct hlist_head	*fz_hash;	/* Hash table pointer	*/
+		//node的个数...需要注意的是一个node指示这一个网段...(网络地址)
 	int			fz_nent;	/* Number of entries	*/
-
+		
+		//计算node添加到hash中哪个bucket的作用..
 	int			fz_divisor;	/* Hash divisor		*/
 	u32			fz_hashmask;	/* (fz_divisor - 1)	*/
 #define FZ_HASHMASK(fz)		((fz)->fz_hashmask)
 
+		//掩码的长度...
 	int			fz_order;	/* Zone order		*/
+		//存放子网掩码值.
 	__be32			fz_mask;
 #define FZ_MASK(fz)		((fz)->fz_mask)
 };
@@ -362,10 +368,13 @@ out:
 }
 
 /* Insert node F to FZ. */
+/*
+fz是已经确定了一个掩码长度的zone..该zone里面存放着多个node..每个node代表着不同的一个网段.
+每个node的存放在根据网段进行hash得到的值，该值确定hash表的一个bucket，然后添加到该bucket的头咯.
+可以看到计算hash值的函数是fn_hash(f->fn_key, fz);
+*/
 static inline void fib_insert_node(struct fn_zone *fz, struct fib_node *f)
 {
-								//fz是已经确定了一个掩码长度的zone...这里是让fz+fn_key计算掩码得到hash数组的项.
-								//在同一个fn_zone，相同掩码长度..那应该认为具有相同的(网络和子网号的划分界限)
 	struct hlist_head *head = &fz->fz_hash[fn_hash(f->fn_key, fz)];
 
 	hlist_add_head(&f->fn_hash, head);

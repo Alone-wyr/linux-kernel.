@@ -152,8 +152,7 @@ static void ap_put(struct asyncppp *ap)
  * Called when a tty is put into PPP line discipline. Called in process
  * context.
  */
-static int
-ppp_asynctty_open(struct tty_struct *tty)
+static int ppp_asynctty_open(struct tty_struct *tty)
 {
 	struct asyncppp *ap;
 	int err;

@@ -60,9 +60,9 @@ struct msghdr {
 	void	*	msg_name;	/* Socket name			*/
 	//目的地址长度.
 	int		msg_namelen;	/* Length of name		*/
-	//分散的数据块数组.
+		//分散的数据块数组.
 	struct iovec *	msg_iov;	/* Data blocks			*/
-	//分散的数据块数目.
+		//分散的数据块数目.
 	__kernel_size_t	msg_iovlen;	/* Number of blocks		*/
 	//控制数据.
 	void 	*	msg_control;	/* Per protocol magic (eg BSD file descriptor passing) */

@@ -466,6 +466,8 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 restart:
 	/* This is a bit ugly for now but means we can break the 'ldisc
 	   is part of the tty struct' assumption later */
+	   //用户程序调用ioctl时候传递过来的参数，就是discipline的id号..
+	   //根据id号获取discipline的结构体struct tty_Idisc..
 	retval = tty_ldisc_get(ldisc, &new_ldisc);
 	if (retval)
 		return retval;
@@ -475,7 +477,7 @@ restart:
 	 */
 
 	tty_wait_until_sent(tty, 0);
-
+	//查看说当前tty的displine是不是要设置的相同...如果是就不需要设置了...
 	if (tty->ldisc.ops->num == ldisc) {
 		tty_ldisc_put(new_ldisc.ops);
 		return 0;
@@ -572,6 +574,7 @@ restart:
 	/* Now set up the new line discipline. */
 	tty_ldisc_assign(tty, &new_ldisc);
 	tty_set_termios_ldisc(tty, ldisc);
+	//调用open函数，创建新的struct channel,,并注册到系统..
 	if (new_ldisc.ops->open)
 		retval = (new_ldisc.ops->open)(tty);
 	if (retval < 0) {
