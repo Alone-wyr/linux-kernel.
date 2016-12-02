@@ -226,8 +226,7 @@ nf_ct_tuple_mask_cmp(const struct nf_conntrack_tuple *t,
 		     const struct nf_conntrack_tuple *tuple,
 		     const struct nf_conntrack_tuple_mask *mask)
 {
-	return nf_ct_tuple_src_mask_cmp(t, tuple, mask) &&
-	       __nf_ct_tuple_dst_equal(t, tuple);
+	return nf_ct_tuple_src_mask_cmp(t, tuple, mask) && __nf_ct_tuple_dst_equal(t, tuple);
 }
 
 #endif /* _NF_CONNTRACK_TUPLE_H */

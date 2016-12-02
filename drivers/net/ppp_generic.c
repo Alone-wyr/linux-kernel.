@@ -191,6 +191,7 @@ static atomic_t channel_count = ATOMIC_INIT(0);
 static int ppp_net_id;
 struct ppp_net {
 	/* units to ppp mapping */
+	//用来记录ppp编号使用的情况....
 	struct idr units_idr;
 
 	/*

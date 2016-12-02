@@ -420,8 +420,7 @@ nf_nat_seq_adjust(struct sk_buff *skb,
 
 /* Setup NAT on this expected conntrack so it follows master. */
 /* If we fail to get a free NAT slot, we'll get dropped on confirm */
-void nf_nat_follow_master(struct nf_conn *ct,
-			  struct nf_conntrack_expect *exp)
+void nf_nat_follow_master(struct nf_conn *ct, struct nf_conntrack_expect *exp)
 {
 	struct nf_nat_range range;
 
@@ -429,16 +428,17 @@ void nf_nat_follow_master(struct nf_conn *ct,
 	BUG_ON(ct->status & IPS_NAT_DONE_MASK);
 
 	/* Change src to where master sends to */
+	//改变src...该src就是master连接中设定的目的地址..
 	range.flags = IP_NAT_RANGE_MAP_IPS;
-	range.min_ip = range.max_ip
-		= ct->master->tuplehash[!exp->dir].tuple.dst.u3.ip;
+	range.min_ip = range.max_ip = ct->master->tuplehash[!exp->dir].tuple.dst.u3.ip;
 	nf_nat_setup_info(ct, &range, IP_NAT_MANIP_SRC);
 
 	/* For DST manip, map port here to where it's expected. */
+	//改变dst...该dst就是master连接中设定的源地址..
+	//同时也需要改变端口...目的端口吧...
 	range.flags = (IP_NAT_RANGE_MAP_IPS | IP_NAT_RANGE_PROTO_SPECIFIED);
 	range.min = range.max = exp->saved_proto;
-	range.min_ip = range.max_ip
-		= ct->master->tuplehash[!exp->dir].tuple.src.u3.ip;
+	range.min_ip = range.max_ip = ct->master->tuplehash[!exp->dir].tuple.src.u3.ip;
 	nf_nat_setup_info(ct, &range, IP_NAT_MANIP_DST);
 }
 EXPORT_SYMBOL(nf_nat_follow_master);

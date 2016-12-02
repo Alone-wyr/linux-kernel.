@@ -1362,15 +1362,13 @@ static int tty_reopen(struct tty_struct *tty)
  * relaxed for the (most common) case of reopening a tty.
  */
 
-struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx,
-								int first_ok)
+struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx, int first_ok)
 {
 	struct tty_struct *tty;
 	int retval;
 
 	/* Check if pty master is being opened multiple times */
-	if (driver->subtype == PTY_TYPE_MASTER &&
-		(driver->flags & TTY_DRIVER_DEVPTS_MEM) && !first_ok)
+	if (driver->subtype == PTY_TYPE_MASTER && (driver->flags & TTY_DRIVER_DEVPTS_MEM) && !first_ok)
 		return ERR_PTR(-EIO);
 
 	/*
@@ -1388,7 +1386,10 @@ struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx,
 	if (!tty)
 		goto fail_no_mem;
 	initialize_tty_struct(tty, driver, idx);
-
+	//tty->link也指向另外一个新创建的tty...它的line discipline 设置为N_TTY
+	//建立起2个方向之间的链路...
+	//tty的driver就是ptm...
+	//新创建的则是pts...
 	retval = tty_driver_install_tty(driver, tty);
 	if (retval < 0) {
 		free_tty_struct(tty);
@@ -1401,7 +1402,8 @@ struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx,
 	 * If we fail here just call release_tty to clean up.  No need
 	 * to decrement the use counts, as release_tty doesn't care.
 	 */
-
+	//设置tty的line discipline..分别调用tty和tty->link的line discipline的open函数.
+	//ptm0/pts0
 	retval = tty_ldisc_setup(tty, tty->link);
 	if (retval)
 		goto release_mem_out;
@@ -1834,12 +1836,11 @@ got_driver:
 	tty_driver_kref_put(driver);
 	if (IS_ERR(tty))
 		return PTR_ERR(tty);
-
+	//保存起来...设备结点的private指向所属的struct tty_struct 
 	filp->private_data = tty;
 	file_move(filp, &tty->tty_files);
 	check_tty_count(tty, "tty_open");
-	if (tty->driver->type == TTY_DRIVER_TYPE_PTY &&
-	    tty->driver->subtype == PTY_TYPE_MASTER)
+	if (tty->driver->type == TTY_DRIVER_TYPE_PTY && tty->driver->subtype == PTY_TYPE_MASTER)
 		noctty = 1;
 #ifdef TTY_DEBUG_HANGUP
 	printk(KERN_DEBUG "opening %s...", tty->name);
@@ -2951,8 +2952,7 @@ int tty_register_driver(struct tty_driver *driver)
 	}
 
 	if (!driver->major) {
-		error = alloc_chrdev_region(&dev, driver->minor_start,
-						driver->num, driver->name);
+		error = alloc_chrdev_region(&dev, driver->minor_start, driver->num, driver->name);
 		if (!error) {
 			driver->major = MAJOR(dev);
 			driver->minor_start = MINOR(dev);

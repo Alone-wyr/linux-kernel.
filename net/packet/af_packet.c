@@ -181,6 +181,7 @@ struct packet_sock {
 				auxdata:1,
 				origdev:1;
 	int			ifindex;	/* bound device		*/
+		//nun存放的是socket时候的protocol参数..(也就是三个参数)...
 	__be16			num;
 	struct packet_mclist	*mclist;
 #ifdef CONFIG_PACKET_MMAP
@@ -521,8 +522,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 	if (snaplen > res)
 		snaplen = res;
 
-	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
-	    (unsigned)sk->sk_rcvbuf)
+	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >= (unsigned)sk->sk_rcvbuf)
 		goto drop_n_acct;
 
 	if (skb_shared(skb)) {
@@ -538,8 +538,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 		skb = nskb;
 	}
 
-	BUILD_BUG_ON(sizeof(*PACKET_SKB_CB(skb)) + MAX_ADDR_LEN - 8 >
-		     sizeof(skb->cb));
+	BUILD_BUG_ON(sizeof(*PACKET_SKB_CB(skb)) + MAX_ADDR_LEN - 8 > sizeof(skb->cb));
 
 	sll = &PACKET_SKB_CB(skb)->sa.ll;
 	sll->sll_family = AF_PACKET;
@@ -1041,8 +1040,9 @@ static int packet_create(struct net *net, struct socket *sock, int protocol)
 
 	if (!capable(CAP_NET_RAW))
 		return -EPERM;
-	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
-	    sock->type != SOCK_PACKET)
+	//socket(PF_PACKET, SOCK_RAW, ETH_PPPOE_SESSION);
+	//socket(PF_PACKET, SOCK_RAW, ETH_PPPOE_DISCOVERY);
+	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW && sock->type != SOCK_PACKET)
 		return -ESOCKTNOSUPPORT;
 
 	sock->state = SS_UNCONNECTED;
@@ -1051,7 +1051,9 @@ static int packet_create(struct net *net, struct socket *sock, int protocol)
 	sk = sk_alloc(net, PF_PACKET, GFP_KERNEL, &packet_proto);
 	if (sk == NULL)
 		goto out;
-
+	/*
+		type是在调用socket创建时候设置的..
+	*/
 	sock->ops = &packet_ops;
 	if (sock->type == SOCK_PACKET)
 		sock->ops = &packet_ops_spkt;
@@ -1084,7 +1086,9 @@ static int packet_create(struct net *net, struct socket *sock, int protocol)
 		sock_hold(sk);
 		po->running = 1;
 	}
-
+	/*
+		通过family:packet创建的scok,,放在sklist链表中啦...
+	*/
 	write_lock_bh(&net->packet.sklist_lock);
 	sk_add_node(sk, &net->packet.sklist);
 	sock_prot_inuse_add(net, &packet_proto, 1);

@@ -132,8 +132,7 @@ nf_ct_find_expectation(struct net *net, const struct nf_conntrack_tuple *tuple)
 
 	h = nf_ct_expect_dst_hash(tuple);
 	hlist_for_each_entry(i, n, &net->ct.expect_hash[h], hnode) {
-		if (!(i->flags & NF_CT_EXPECT_INACTIVE) &&
-		    nf_ct_tuple_mask_cmp(tuple, &i->tuple, &i->mask)) {
+		if (!(i->flags & NF_CT_EXPECT_INACTIVE) && nf_ct_tuple_mask_cmp(tuple, &i->tuple, &i->mask)) {
 			exp = i;
 			break;
 		}
@@ -313,15 +312,17 @@ static void nf_ct_expect_insert(struct nf_conntrack_expect *exp)
 	unsigned int h = nf_ct_expect_dst_hash(&exp->tuple);
 
 	atomic_inc(&exp->use);
-
+	//nf_conn代表一个链接跟踪的结构体...
+	//nf_connf_help是属于一个nf_conn的....
+	//因此这里是添加到链接连接的期待连接链表上...
 	hlist_add_head(&exp->lnode, &master_help->expectations);
 	master_help->expecting[exp->class]++;
-
+	//这里就是添加到整个系统的....
 	hlist_add_head_rcu(&exp->hnode, &net->ct.expect_hash[h]);
 	net->ct.expect_count++;
-
-	setup_timer(&exp->timeout, nf_ct_expectation_timed_out,
-		    (unsigned long)exp);
+	//下面设置定时器.....timeout作为结点添加到系统..
+	setup_timer(&exp->timeout, nf_ct_expectation_timed_out,(unsigned long)exp);
+	//根据参数设置超时时间...并启动定时器..
 	p = &master_help->helper->expect_policy[exp->class];
 	exp->timeout.expires = jiffies + p->timeout * HZ;
 	add_timer(&exp->timeout);

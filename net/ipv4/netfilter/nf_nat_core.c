@@ -103,8 +103,7 @@ EXPORT_SYMBOL(nf_nat_used_tuple);
 /* If we source map this tuple so reply looks like reply_tuple, will
  * that meet the constraints of range. */
 static int
-in_range(const struct nf_conntrack_tuple *tuple,
-	 const struct nf_nat_range *range)
+in_range(const struct nf_conntrack_tuple *tuple, const struct nf_nat_range *range)
 {
 	const struct nf_nat_protocol *proto;
 	int ret = 0;
@@ -112,16 +111,13 @@ in_range(const struct nf_conntrack_tuple *tuple,
 	/* If we are supposed to map IPs, then we must be in the
 	   range specified, otherwise let this drag us onto a new src IP. */
 	if (range->flags & IP_NAT_RANGE_MAP_IPS) {
-		if (ntohl(tuple->src.u3.ip) < ntohl(range->min_ip) ||
-		    ntohl(tuple->src.u3.ip) > ntohl(range->max_ip))
+		if (ntohl(tuple->src.u3.ip) < ntohl(range->min_ip) ||  ntohl(tuple->src.u3.ip) > ntohl(range->max_ip))
 			return 0;
 	}
 
 	rcu_read_lock();
 	proto = __nf_nat_proto_find(tuple->dst.protonum);
-	if (!(range->flags & IP_NAT_RANGE_PROTO_SPECIFIED) ||
-	    proto->in_range(tuple, IP_NAT_MANIP_SRC,
-			    &range->min, &range->max))
+	if (!(range->flags & IP_NAT_RANGE_PROTO_SPECIFIED) || proto->in_range(tuple, IP_NAT_MANIP_SRC, &range->min, &range->max))
 		ret = 1;
 	rcu_read_unlock();
 
@@ -135,9 +131,8 @@ same_src(const struct nf_conn *ct,
 	const struct nf_conntrack_tuple *t;
 
 	t = &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
-	return (t->dst.protonum == tuple->dst.protonum &&
-		t->src.u3.ip == tuple->src.u3.ip &&
-		t->src.u.all == tuple->src.u.all);
+			//L4协议号(比如TCP/UDP)					源IP地址..					源端口号..
+	return (t->dst.protonum == tuple->dst.protonum && t->src.u3.ip == tuple->src.u3.ip && t->src.u.all == tuple->src.u.all);
 }
 
 /* Only called for SRC manip */
@@ -323,7 +318,7 @@ unsigned int nf_nat_setup_info(struct nf_conn *ct,  const struct nf_nat_range *r
 		这个new_tuple很重要!!!不过要记得它还依旧是original方向的tuple，只是经过转换了而已!!
 	*/
 	get_unique_tuple(&new_tuple, &curr_tuple, range, ct, maniptype);
-
+	//转换后如果还是相同....那就是不需要NAT转换(IP或端口)
 	if (!nf_ct_tuple_equal(&new_tuple, &curr_tuple)) {
 		struct nf_conntrack_tuple reply;
 
@@ -344,6 +339,8 @@ unsigned int nf_nat_setup_info(struct nf_conn *ct,  const struct nf_nat_range *r
 
 	/* Place in source hash if this is the first time. */
 	if (have_to_hash) {
+		//经过nat转化都需要作为结点添加到net->ipv4.nat_bysouce的链表上...
+		//因为可能需要DNAT和SNAT转换...只需要添加一次...因此have_to_hash就是记录之前是不是添加过了..如果是..就不需要在添加了.
 		unsigned int srchash;
 
 		srchash = hash_by_src(&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);

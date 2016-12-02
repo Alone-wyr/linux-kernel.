@@ -587,12 +587,14 @@ init_conntrack(struct net *net,
 	nf_ct_acct_ext_add(ct, GFP_ATOMIC);
 
 	spin_lock_bh(&nf_conntrack_lock);
+	//查找期待链接的相关结构体..判断这个新连接是不是属于期待连接.
 	exp = nf_ct_find_expectation(net, tuple);
 	if (exp) {
 		pr_debug("conntrack: expectation arrives ct=%p exp=%p\n",
 			 ct, exp);
 		/* Welcome, Mr. Bond.  We've been expecting you... */
 		__set_bit(IPS_EXPECTED_BIT, &ct->status);
+		//指向创建期待连接的那个连接...
 		ct->master = exp->master;
 		if (exp->helper) {
 			help = nf_ct_helper_ext_add(ct, GFP_ATOMIC);
@@ -609,6 +611,8 @@ init_conntrack(struct net *net,
 		nf_conntrack_get(&ct->master->ct_general);
 		NF_CT_STAT_INC(net, expect_new);
 	} else {
+		//判断该连接是否需要创建期待连接....
+		//如果是的话..它需要创建额外的空间来确定保存它和期待连接的关联咯..~
 		__nf_ct_try_assign_helper(ct, GFP_ATOMIC);
 		NF_CT_STAT_INC(net, new);
 	}
@@ -623,6 +627,9 @@ init_conntrack(struct net *net,
 	spin_unlock_bh(&nf_conntrack_lock);
 
 	if (exp) {
+		//来这个执行路径是因为..该新连接属于期待连接.啦...调用期待函数...
+		//很可能就是做一些NAT咯...比如函数nf_nat_follow_master....很多应用都是设置为该函数...
+		//也就是根据master做NAT穿透.
 		if (exp->expectfn)
 			exp->expectfn(ct, exp);
 		nf_ct_expect_put(exp);

@@ -35,10 +35,7 @@ unsigned int (*nf_nat_tftp_hook)(struct sk_buff *skb,
 				 struct nf_conntrack_expect *exp) __read_mostly;
 EXPORT_SYMBOL_GPL(nf_nat_tftp_hook);
 
-static int tftp_help(struct sk_buff *skb,
-		     unsigned int protoff,
-		     struct nf_conn *ct,
-		     enum ip_conntrack_info ctinfo)
+static int tftp_help(struct sk_buff *skb, unsigned int protoff, struct nf_conn *ct, enum ip_conntrack_info ctinfo)
 {
 	const struct tftphdr *tfh;
 	struct tftphdr _tftph;
@@ -46,9 +43,8 @@ static int tftp_help(struct sk_buff *skb,
 	struct nf_conntrack_tuple *tuple;
 	unsigned int ret = NF_ACCEPT;
 	typeof(nf_nat_tftp_hook) nf_nat_tftp;
-
-	tfh = skb_header_pointer(skb, protoff + sizeof(struct udphdr),
-				 sizeof(_tftph), &_tftph);
+	//获取TFTP头部...
+	tfh = skb_header_pointer(skb, protoff + sizeof(struct udphdr), sizeof(_tftph), &_tftph);
 	if (tfh == NULL)
 		return NF_ACCEPT;
 
@@ -58,7 +54,7 @@ static int tftp_help(struct sk_buff *skb,
 		/* RRQ and WRQ works the same way */
 		nf_ct_dump_tuple(&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
 		nf_ct_dump_tuple(&ct->tuplehash[IP_CT_DIR_REPLY].tuple);
-
+		//分配一个struct nf_conntrack_expect...同时设置master字段指向ct.
 		exp = nf_ct_expect_alloc(ct);
 		if (exp == NULL)
 			return NF_DROP;
@@ -72,6 +68,7 @@ static int tftp_help(struct sk_buff *skb,
 		nf_ct_dump_tuple(&exp->tuple);
 
 		nf_nat_tftp = rcu_dereference(nf_nat_tftp_hook);
+		//判定是否做了nat处理...
 		if (nf_nat_tftp && ct->status & IPS_NAT_MASK)
 			ret = nf_nat_tftp(skb, ctinfo, exp);
 		else if (nf_ct_expect_related(exp) != 0)
@@ -123,6 +120,7 @@ static int __init nf_conntrack_tftp_init(void)
 		tftp[i][0].tuple.src.l3num = AF_INET;
 		tftp[i][1].tuple.src.l3num = AF_INET6;
 		for (j = 0; j < 2; j++) {
+			//初始化nf_conntrack_helper结构体...
 			tftp[i][j].tuple.dst.protonum = IPPROTO_UDP;
 			tftp[i][j].tuple.src.u.udp.port = htons(ports[i]);
 			tftp[i][j].expect_policy = &tftp_exp_policy;
@@ -135,12 +133,10 @@ static int __init nf_conntrack_tftp_init(void)
 			else
 				sprintf(tmpname, "tftp-%u", i);
 			tftp[i][j].name = tmpname;
-
+			//注册到系统..
 			ret = nf_conntrack_helper_register(&tftp[i][j]);
 			if (ret) {
-				printk("nf_ct_tftp: failed to register helper "
-				       "for pf: %u port: %u\n",
-					tftp[i][j].tuple.src.l3num, ports[i]);
+				printk("nf_ct_tftp: failed to register helper for pf: %u port: %u\n", tftp[i][j].tuple.src.l3num, ports[i]);
 				nf_conntrack_tftp_fini();
 				return ret;
 			}

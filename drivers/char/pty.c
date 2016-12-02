@@ -99,8 +99,7 @@ static void pty_unthrottle(struct tty_struct *tty)
  * not our partners. We can't just take the other one blindly without
  * risking deadlocks.
  */
-static int pty_write(struct tty_struct *tty, const unsigned char *buf,
-								int count)
+static int pty_write(struct tty_struct *tty, const unsigned char *buf, int count)
 {
 	struct tty_struct *to = tty->link;
 	int	c;
@@ -552,6 +551,7 @@ static int pty_unix98_install(struct tty_driver *driver, struct tty_struct *tty)
 		free_tty_struct(o_tty);
 		return -ENOMEM;
 	}
+		//pts0
 	initialize_tty_struct(o_tty, driver->other, idx);
 
 	tty->termios = kzalloc(sizeof(struct ktermios[2]), GFP_KERNEL);
@@ -570,6 +570,7 @@ static int pty_unix98_install(struct tty_driver *driver, struct tty_struct *tty)
 	if (driver->subtype == PTY_TYPE_MASTER)
 		o_tty->count++;
 	/* Establish the links in both directions */
+	//把它们链接在一起...
 	tty->link   = o_tty;
 	o_tty->link = tty;
 	/*
@@ -647,6 +648,7 @@ static int __ptmx_open(struct inode *inode, struct file *filp)
 	nonseekable_open(inode, filp);
 
 	/* find a device that is not in use. */
+	//查找一个还没有被使用的设备...
 	index = devpts_new_index(inode);
 	if (index < 0)
 		return index;
@@ -663,11 +665,12 @@ static int __ptmx_open(struct inode *inode, struct file *filp)
 	set_bit(TTY_PTY_LOCK, &tty->flags); /* LOCK THE SLAVE */
 	filp->private_data = tty;
 	file_move(filp, &tty->tty_files);
-
+	//这里创建一个新的设备文件...这样可以在/dev/目录下看到..
+	//比如说/dev/pts/0  ...这个文件名<0>就是新创建的..
 	retval = devpts_pty_new(inode, tty->link);
 	if (retval)
 		goto out1;
-
+	//调用tty_struct 的open函数....
 	retval = ptm_driver->ops->open(tty, filp);
 	if (!retval)
 		return 0;
@@ -716,6 +719,9 @@ static void __init unix98_pty_init(void)
 	ptm_driver->init_termios.c_ospeed = 38400;
 	ptm_driver->flags = TTY_DRIVER_RESET_TERMIOS | TTY_DRIVER_REAL_RAW |
 		TTY_DRIVER_DYNAMIC_DEV | TTY_DRIVER_DEVPTS_MEM;
+		//在打开/dev/ptmx的时候..会创建成对的tty....
+		//一个由ptm_driver->name + index生成的tty->ptm0
+		//另一个有ptm_driver->other->name+index生成的tty->pts0
 	ptm_driver->other = pts_driver;
 	tty_set_operations(ptm_driver, &ptm_unix98_ops);
 
@@ -734,21 +740,27 @@ static void __init unix98_pty_init(void)
 		TTY_DRIVER_DYNAMIC_DEV | TTY_DRIVER_DEVPTS_MEM;
 	pts_driver->other = ptm_driver;
 	tty_set_operations(pts_driver, &pty_unix98_ops);
-
+	/*
+		下面注册ptm/pts驱动...注意到struct tty_driver结构体是内包含了struct cdev了的...
+		因此下面应该就是注册驱动..同时也注册了cdev....
+		看了一下..并不会在/dev/目录下创建什么什么设备结点....好吧..(.)
+	*/
 	if (tty_register_driver(ptm_driver))
 		panic("Couldn't register Unix98 ptm driver");
 	if (tty_register_driver(pts_driver))
 		panic("Couldn't register Unix98 pts driver");
 
 	register_sysctl_table(pty_root_table);
-
+	/*
+		下面注册/dev/ptmx这个设备结点....会生成/dev/ptmx设备结点..同时打开该结点，会在/dev/pts/目录下创建一个设备文件.
+		这样成对的出现..比如/dev/pts/0
+	*/
 	/* Now create the /dev/ptmx special device */
 	tty_default_fops(&ptmx_fops);
 	ptmx_fops.open = ptmx_open;
 
 	cdev_init(&ptmx_cdev, &ptmx_fops);
-	if (cdev_add(&ptmx_cdev, MKDEV(TTYAUX_MAJOR, 2), 1) ||
-	    register_chrdev_region(MKDEV(TTYAUX_MAJOR, 2), 1, "/dev/ptmx") < 0)
+	if (cdev_add(&ptmx_cdev, MKDEV(TTYAUX_MAJOR, 2), 1) || register_chrdev_region(MKDEV(TTYAUX_MAJOR, 2), 1, "/dev/ptmx") < 0)
 		panic("Couldn't register /dev/ptmx driver\n");
 	device_create(tty_class, NULL, MKDEV(TTYAUX_MAJOR, 2), NULL, "ptmx");
 }

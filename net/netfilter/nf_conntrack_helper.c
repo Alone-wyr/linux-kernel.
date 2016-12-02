@@ -45,8 +45,7 @@ static unsigned int helper_hash(const struct nf_conntrack_tuple *tuple)
 		(__force __u16)tuple->src.u.all) % nf_ct_helper_hsize;
 }
 
-static struct nf_conntrack_helper *
-__nf_ct_helper_find(const struct nf_conntrack_tuple *tuple)
+static struct nf_conntrack_helper * __nf_ct_helper_find(const struct nf_conntrack_tuple *tuple)
 {
 	struct nf_conntrack_helper *helper;
 	struct nf_conntrack_tuple_mask mask = { .src.u.all = htons(0xFFFF) };
@@ -138,6 +137,7 @@ static inline int unhelp(struct nf_conntrack_tuple_hash *i,
 
 int nf_conntrack_helper_register(struct nf_conntrack_helper *me)
 {
+	//计算添加到hash的bucket...
 	unsigned int h = helper_hash(&me->tuple);
 
 	BUG_ON(me->expect_policy == NULL);

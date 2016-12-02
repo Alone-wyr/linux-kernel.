@@ -1383,8 +1383,7 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 
 	if (tty->real_raw) {
 		spin_lock_irqsave(&tty->read_lock, cpuflags);
-		i = min(N_TTY_BUF_SIZE - tty->read_cnt,
-			N_TTY_BUF_SIZE - tty->read_head);
+		i = min(N_TTY_BUF_SIZE - tty->read_cnt, N_TTY_BUF_SIZE - tty->read_head);
 		i = min(count, i);
 		memcpy(tty->read_buf + tty->read_head, cp, i);
 		tty->read_head = (tty->read_head + i) & (N_TTY_BUF_SIZE-1);

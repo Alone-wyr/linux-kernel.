@@ -115,6 +115,7 @@ struct inet_sock {
 	__be32			daddr;
 	__be32			rcv_saddr;
 	__be16			dport;
+		//对于type为RAW的话....保存的是protocol参数.
 	__u16			num;		// -- 源端口号.
 	__be32			saddr;
 	__s16			uc_ttl;

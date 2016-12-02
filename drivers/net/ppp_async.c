@@ -292,6 +292,7 @@ ppp_asynctty_ioctl(struct tty_struct *tty, struct file *file,
 		return -ENXIO;
 	err = -EFAULT;
 	switch (cmd) {
+		//0x40047437
 	case PPPIOCGCHAN:
 		err = -EFAULT;
 		if (put_user(ppp_channel_index(&ap->chan), p))
@@ -350,8 +351,12 @@ ppp_asynctty_receive(struct tty_struct *tty, const unsigned char *buf,
 	if (!ap)
 		return;
 	spin_lock_irqsave(&ap->recv_lock, flags);
+	//这个函数..也只是把数据buf...处理后成为strcut skb_buff..然后放到rqueue链表...
+	//真正处理数据包的则等到下面启动tasklet来处理..
 	ppp_async_input(ap, buf, cflags, count);
 	spin_unlock_irqrestore(&ap->recv_lock, flags);
+	//如果接受队列有数据包没有处理...那就让tasklet来处理....
+	//毕竟这个函数是在中断上下文的...它要尽快的返回.
 	if (!skb_queue_empty(&ap->rqueue))
 		tasklet_schedule(&ap->tsk);
 	ap_put(ap);
@@ -909,6 +914,7 @@ ppp_async_input(struct asyncppp *ap, const unsigned char *buf,
 		if (flags != NULL && flags[n] != 0) {
 			ap->state |= SC_TOSS;
 		} else if (c == PPP_FLAG) {
+			//看到PPP帧结束字符PPP_FLAG..
 			process_input_packet(ap);
 		} else if (c == PPP_ESCAPE) {
 			ap->state |= SC_ESCAPE;

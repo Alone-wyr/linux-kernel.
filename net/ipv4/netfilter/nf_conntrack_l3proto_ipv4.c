@@ -87,6 +87,12 @@ static int ipv4_get_l4proto(const struct sk_buff *skb, unsigned int nhoff,
 	return NF_ACCEPT;
 }
 
+/*
+这里是数据包要出去了....做最后的处理..也就是说..数据包从preroutong - > postrouting穿越了防火墙最后确定是可以发送出去的
+数据包...这里就做两件事情:
+1.该连接有期待连接的话..就调用helper->help来执行期待连接相关处理.
+2.把链接跟踪从unconfirmed链表上remove掉..并且开启定时器...链接跟踪的active时间..
+*/
 static unsigned int ipv4_confirm(unsigned int hooknum,
 				 struct sk_buff *skb,
 				 const struct net_device *in,
@@ -113,8 +119,7 @@ static unsigned int ipv4_confirm(unsigned int hooknum,
 	if (!helper)
 		goto out;
 
-	ret = helper->help(skb, skb_network_offset(skb) + ip_hdrlen(skb),
-			   ct, ctinfo);
+	ret = helper->help(skb, skb_network_offset(skb) + ip_hdrlen(skb),  ct, ctinfo);
 	if (ret != NF_ACCEPT)
 		return ret;
 

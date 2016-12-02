@@ -308,8 +308,7 @@ int skb_copy_datagram_iovec(const struct sk_buff *skb, int offset,
 			if (copy > len)
 				copy = len;
 			vaddr = kmap(page);
-			err = memcpy_toiovec(to, vaddr + frag->page_offset +
-					     offset - start, copy);
+			err = memcpy_toiovec(to, vaddr + frag->page_offset + offset - start, copy);
 			kunmap(page);
 			if (err)
 				goto fault;

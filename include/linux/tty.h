@@ -248,6 +248,7 @@ struct tty_struct {
 	wait_queue_head_t write_wait;
 	wait_queue_head_t read_wait;
 	struct work_struct hangup_work;
+		//存放struct asyncppp结构指针..那样就可以得到该tty所属的struct channel.
 	void *disc_data;
 	void *driver_data;
 	struct list_head tty_files;

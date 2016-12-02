@@ -85,8 +85,8 @@ masquerade_tg(struct sk_buff *skb, const struct xt_target_param *par)
 	/* Transfer from original range. */
 	newrange = ((struct nf_nat_range)
 		{ mr->range[0].flags | IP_NAT_RANGE_MAP_IPS,
-		  newsrc, newsrc,
-		  mr->range[0].min, mr->range[0].max });
+		  newsrc, newsrc,						//ip range.
+		  mr->range[0].min, mr->range[0].max });	//port range.
 
 	/* Hand modified range to generic setup. */
 	return nf_nat_setup_info(ct, &newrange, IP_NAT_MANIP_SRC);

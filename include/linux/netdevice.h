@@ -357,8 +357,7 @@ static inline int napi_disable_pending(struct napi_struct *n)
  */
 static inline int napi_schedule_prep(struct napi_struct *n)
 {
-	return !napi_disable_pending(n) &&
-		!test_and_set_bit(NAPI_STATE_SCHED, &n->state);
+	return !napi_disable_pending(n) && !test_and_set_bit(NAPI_STATE_SCHED, &n->state);
 			//设置n->state的NAPI_STATE_SCHED为1，同时返回上次这个bit的值(0或1)
 }
 

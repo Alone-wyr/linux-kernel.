@@ -935,8 +935,7 @@ static struct inet_protosw inetsw_array[] =
 		.ops =        &inet_stream_ops,
 		.capability = -1,
 		.no_check =   0,
-		.flags =      INET_PROTOSW_PERMANENT |
-			      INET_PROTOSW_ICSK,
+		.flags =      INET_PROTOSW_PERMANENT | INET_PROTOSW_ICSK,
 	},
 
 	{
@@ -948,7 +947,6 @@ static struct inet_protosw inetsw_array[] =
 		.no_check =   UDP_CSUM_DEFAULT,
 		.flags =      INET_PROTOSW_PERMANENT,
        },
-
 
        {
 	       .type =       SOCK_RAW,

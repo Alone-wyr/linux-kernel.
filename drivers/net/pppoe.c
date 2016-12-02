@@ -419,8 +419,7 @@ abort_kfree:
  * Receive wrapper called in BH context.
  *
  ***********************************************************************/
-static int pppoe_rcv(struct sk_buff *skb, struct net_device *dev,
-		     struct packet_type *pt, struct net_device *orig_dev)
+static int pppoe_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct pppoe_hdr *ph;
 	struct pppox_sock *po;
@@ -433,10 +432,10 @@ static int pppoe_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	if (!pskb_may_pull(skb, sizeof(struct pppoe_hdr)))
 		goto drop;
-
+	//从数据包中提取pppoe header...
 	ph = pppoe_hdr(skb);
 	len = ntohs(ph->length);
-
+	//调整skb->data准备传递给high-level.
 	skb_pull_rcsum(skb, sizeof(*ph));
 	if (skb->len < len)
 		goto drop;
@@ -445,6 +444,7 @@ static int pppoe_rcv(struct sk_buff *skb, struct net_device *dev,
 		goto drop;
 
 	pn = pppoe_pernet(dev_net(dev));
+	//根据pppoe header的信息..确定一个接收数据包的struct sock!.
 	po = get_item(pn, ph->sid, eth_hdr(skb)->h_source, dev->ifindex);
 	if (!po)
 		goto drop;
@@ -463,8 +463,7 @@ out:
  * This is solely for detection of PADT frames
  *
  ***********************************************************************/
-static int pppoe_disc_rcv(struct sk_buff *skb, struct net_device *dev,
-			  struct packet_type *pt, struct net_device *orig_dev)
+static int pppoe_disc_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 
 {
 	struct pppoe_hdr *ph;
