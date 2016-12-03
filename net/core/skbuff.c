@@ -168,8 +168,19 @@ EXPORT_SYMBOL(skb_under_panic);
  *	Buffers may only be allocated from interrupts using a @gfp_mask of
  *	%GFP_ATOMIC.
  */
-struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
-			    int fclone, int node)
+ /*
+ size: skb数据大小.
+ fclone:表示从哪个cache中分配..
+ 	 = 1, 从skbuff_fclone_cache.
+ 	 = 0, 从skbuff_head_cache上分配.
+node:分配结点. 	
+
+这2个cache的区别在于skbuff_fclone_cache它是2个skb为1组，也就是一次alloc其实是分配了2个skb...之所以这样是因为，
+后面可能会进行skb_clone的操作...这样做就是为了提高分配效率.
+skbuff_fclone_cache的obj大小: 2*sizeof(struct sk_buff)) + sizeof(atomic_t)
+
+ */
+struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,  int fclone, int node)
 {
 	struct kmem_cache *cache;
 	struct skb_shared_info *shinfo;
@@ -213,7 +224,12 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	shinfo->tx_flags.flags = 0;
 	shinfo->frag_list = NULL;
 	memset(&shinfo->hwtstamps, 0, sizeof(shinfo->hwtstamps));
-
+	/*
+		特别重要!!.如果fclone = 1 , 那么是连续分配了2个skb的...
+		并且设置第一个fclone标记SKB_FCLONE_ORIG..
+		第二个(child)fclone标记SKB_FCLONE_UNAVAILABLE..
+		
+	*/
 	if (fclone) {
 		struct sk_buff *child = skb + 1;
 		atomic_t *fclone_ref = (atomic_t *) (child + 1);
@@ -554,7 +570,9 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 
 	skb_copy_secmark(new, old);
 }
-
+/*
+可以看到...被cline的strure的clone标记被设置为1...
+*/
 static struct sk_buff *__skb_clone(struct sk_buff *n, struct sk_buff *skb)
 {
 #define C(x) n->x = skb->x
@@ -626,9 +644,12 @@ struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
 	struct sk_buff *n;
 
 	n = skb + 1;
-	if (skb->fclone == SKB_FCLONE_ORIG &&
-	    n->fclone == SKB_FCLONE_UNAVAILABLE) {
+	//判断是不是有child...(SKB_FCLONE_ORIG)并且child是可以拿来使用(SKB_FCLONE_UNAVAILABLE)...
+	if (skb->fclone == SKB_FCLONE_ORIG && n->fclone == SKB_FCLONE_UNAVAILABLE) {
+		//递增使用计数...它是在skbuff_fclone_buff这个cache分配时候就分配的: 2*sizeof(struct sk_buff)) +sizeof(atomic_t)
+		//专门给child这个skb计数用的...
 		atomic_t *fclone_ref = (atomic_t *) (n + 1);
+		//已经被使用了...改变标记SKB_FCLONE_UNAVAILABLE->SKB_FCLONE_CLONE
 		n->fclone = SKB_FCLONE_CLONE;
 		atomic_inc(fclone_ref);
 	} else {
@@ -784,8 +805,7 @@ EXPORT_SYMBOL(pskb_copy);
  *	reloaded after call to this function.
  */
 
-int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
-		     gfp_t gfp_mask)
+int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,  gfp_t gfp_mask)
 {
 	int i;
 	u8 *data;

@@ -676,6 +676,7 @@ ppp_async_push(struct asyncppp *ap)
 		if (!tty_stuffed && ap->optr < ap->olim) {
 			avail = ap->olim - ap->optr;
 			set_bit(TTY_DO_WRITE_WAKEUP, &tty->flags);
+			//buf: optr,  count:avail.
 			sent = tty->ops->write(tty, ap->optr, avail);
 			if (sent < 0)
 				goto flush;	/* error, e.g. loss of CD */
@@ -685,6 +686,7 @@ ppp_async_push(struct asyncppp *ap)
 			continue;
 		}
 		if (ap->optr >= ap->olim && ap->tpkt) {
+			//对于ppp协议来说...会有一个转义的过程..
 			if (ppp_async_encode(ap)) {
 				/* finished processing ap->tpkt */
 				clear_bit(XMIT_FULL, &ap->xmit_flags);

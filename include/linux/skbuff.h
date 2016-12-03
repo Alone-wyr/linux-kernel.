@@ -221,8 +221,11 @@ struct skb_shared_info {
 
 
 enum {
+		//skb可以使用..
 	SKB_FCLONE_UNAVAILABLE,
+		//后面有skb(child)
 	SKB_FCLONE_ORIG,
+		//child被使用了..
 	SKB_FCLONE_CLONE,
 };
 
@@ -369,6 +372,7 @@ hdr_len:ip头的大小??
 //pkt_type根据L2的目的地址进行类型划分.PACKET_HOST/PACKET_MULTICAST/PACKET_BROADCAST/PACKET_OTHER.....等
 //
 	__u8			local_df:1,
+			//记录该skb被clone过...(clone后新分配的skb的clone也是设置为1)
 				cloned:1,
 				ip_summed:2,
 				nohdr:1,
@@ -428,7 +432,8 @@ hdr_len:ip头的大小??
 	unsigned char		*head, *data;
 //truesize:缓冲区的总大小..包括sk_buffer本身!
 	unsigned int		truesize;
-//引用计数
+//引用计数...skb被引用...users会递增...dataref会递增..
+//如果是clone skb...则dataref会递增....新的skb的user为1...被clone的skb users不变..
 	atomic_t		users;
 };
 
@@ -1541,20 +1546,23 @@ static inline int skb_clone_writable(struct sk_buff *skb, unsigned int len)
 	return !skb_header_cloned(skb) &&
 	       skb_headroom(skb) + len <= skb->hdr_len;
 }
-
-static inline int __skb_cow(struct sk_buff *skb, unsigned int headroom,
-			    int cloned)
+//cow: copy on wirte...
+/*
+因为要往前面的空间里面放数据....headroom是要放数据的大小...cloned是共享标记..
+当大小足够且不是共享的时候...就不用复制了..
+*/
+static inline int __skb_cow(struct sk_buff *skb, unsigned int headroom, int cloned)
 {
 	int delta = 0;
 
 	if (headroom < NET_SKB_PAD)
 		headroom = NET_SKB_PAD;
+	//要reserve的空间大小为headroom,, skb_headroom为返回空间的头部空间大小.
 	if (headroom > skb_headroom(skb))
 		delta = headroom - skb_headroom(skb);
-
+	//delta大于等于1的话...就是不够空间...
 	if (delta || cloned)
-		return pskb_expand_head(skb, ALIGN(delta, NET_SKB_PAD), 0,
-					GFP_ATOMIC);
+		return pskb_expand_head(skb, ALIGN(delta, NET_SKB_PAD), 0, GFP_ATOMIC);
 	return 0;
 }
 

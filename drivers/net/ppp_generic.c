@@ -1005,11 +1005,13 @@ ppp_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	/* Put the 2-byte PPP protocol number on the front,
 	   making sure there is room for the address and control fields. */
 	   /*
-	   	确保有足够的空间来保存address和control fields..!
+	   	确保有足够的空间来保存address和control fields..!(ppp协议)
 	   */
 	if (skb_cow_head(skb, PPP_HDRLEN))
 		goto outf;
-
+	//ppp数据格式..
+	//flag(1byte) + address(1byte) + control(1byte) + protocol(1or 2 bytes) + payload + fcs(2 or 4 bytes) + flag(1byte)
+	//flag = 0x7f, address = 0xff, control = 0x03
 	pp = skb_push(skb, 2);
 	proto = npindex_to_proto[npi];
 	pp[0] = proto >> 8;
