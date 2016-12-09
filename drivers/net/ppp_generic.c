@@ -477,7 +477,10 @@ static ssize_t ppp_read(struct file *file, char __user *buf,
  out:
 	return ret;
 }
-
+/*
+操作/dev/ppp设备文件调用的写函数...虽然打开的都是/dev/ppp设备文件,,,
+但是有是channel和unit的区别..pf->kind来区分这两者的区别.
+*/
 static ssize_t ppp_write(struct file *file, const char __user *buf,
 			 size_t count, loff_t *ppos)
 {
@@ -1010,7 +1013,7 @@ ppp_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (skb_cow_head(skb, PPP_HDRLEN))
 		goto outf;
 	//ppp数据格式..
-	//flag(1byte) + address(1byte) + control(1byte) + protocol(1or 2 bytes) + payload + fcs(2 or 4 bytes) + flag(1byte)
+	//flag(1byte) + address(1byte) + control(1byte) + protocol(1 or 2 bytes) + payload + fcs(2 or 4 bytes) + flag(1byte)
 	//flag = 0x7f, address = 0xff, control = 0x03
 	pp = skb_push(skb, 2);
 	proto = npindex_to_proto[npi];
@@ -1018,6 +1021,7 @@ ppp_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	pp[1] = proto;
 
 	netif_stop_queue(dev);
+	//把skb放到xq队列上..(等待发送队列)..然后尝试去发送..
 	skb_queue_tail(&ppp->file.xq, skb);
 	ppp_xmit_process(ppp);
 	return 0;
@@ -1099,8 +1103,7 @@ static void ppp_setup(struct net_device *dev)
  * Called to do any work queued up on the transmit side
  * that can now be done.
  */
-static void
-ppp_xmit_process(struct ppp *ppp)
+static void ppp_xmit_process(struct ppp *ppp)
 {
 	struct sk_buff *skb;
 
@@ -1172,8 +1175,13 @@ pad_compress_skb(struct ppp *ppp, struct sk_buff *skb)
  * The caller should have locked the xmit path,
  * and xmit_pending should be 0.
  */
-static void
-ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
+ /*
+ 发送一个skb..这个skb是刚从接受队列取下来的...会对该skb进行处理，然后添加到xmit_pending..
+ 在调用ppp_push来发送xmit_pending的数据包
+ 因此对于PPP的数据发送过程，就是先把接收队列的skb取下来，然后经过处理，接着放到xmit_pending上.
+ 实际发送的过程是由ppp_push函数来把xmit_pending上的skb发送的.
+ */
+static void ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
 {
 	int proto = PPP_PROTO(skb);
 	struct sk_buff *new_skb;
@@ -1290,8 +1298,10 @@ ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
  * Try to send the frame in xmit_pending.
  * The caller should have the xmit path locked.
  */
-static void
-ppp_push(struct ppp *ppp)
+ /*
+ 	尝试发送在xmit_pending的skb!!!!如果有就发送..如果发送出去就设置xmit_pending为NULL..
+ */
+static void ppp_push(struct ppp *ppp)
 {
 	struct list_head *list;
 	struct channel *pch;
@@ -1586,7 +1596,7 @@ ppp_channel_push(struct channel *pch)
 	spin_unlock_bh(&pch->downl);
 	/* see if there is anything from the attached unit to be sent */
 	/*
-	这个函数是channel的发送函数...在返回的最后...会去判断一下这个channel所属的unit是否有数据包要发送.
+		这个函数是channel的发送函数...在返回的最后...会去判断一下这个channel所属的unit是否有数据包要发送.
 	*/
 	if (skb_queue_empty(&pch->file.xq)) {
 		read_lock_bh(&pch->upl);

@@ -701,7 +701,9 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
  *	function is not recommended for use in circumstances when only
  *	header is going to be modified. Use pskb_copy() instead.
  */
-
+/*
+拷贝skb...包括skb + 线性数据 + 非线性数据.
+*/
 struct sk_buff *skb_copy(const struct sk_buff *skb, gfp_t gfp_mask)
 {
 	int headerlen = skb->data - skb->head;
@@ -721,7 +723,7 @@ struct sk_buff *skb_copy(const struct sk_buff *skb, gfp_t gfp_mask)
 	skb_reserve(n, headerlen);
 	/* Set the tail pointer and length */
 	skb_put(n, skb->len);
-
+		//headerlen是指的headroom(预留)的大小..里面没有有效数据..
 	if (skb_copy_bits(skb, -headerlen, n->head, headerlen + skb->len))
 		BUG();
 
@@ -742,7 +744,10 @@ EXPORT_SYMBOL(skb_copy);
  *	or the pointer to the buffer on success.
  *	The returned buffer has a reference count of 1.
  */
-
+/*
+拷贝 skb + 线性数据....
+非线性数据就是增加引用计数..
+*/
 struct sk_buff *pskb_copy(struct sk_buff *skb, gfp_t gfp_mask)
 {
 	/*
@@ -756,7 +761,7 @@ struct sk_buff *pskb_copy(struct sk_buff *skb, gfp_t gfp_mask)
 #endif
 	if (!n)
 		goto out;
-
+	//下面3个函数的调用作用把skb的线性数据拷贝过去...
 	/* Set the data pointer */
 	skb_reserve(n, skb->data - skb->head);
 	/* Set the tail pointer and length */
@@ -770,14 +775,14 @@ struct sk_buff *pskb_copy(struct sk_buff *skb, gfp_t gfp_mask)
 
 	if (skb_shinfo(skb)->nr_frags) {
 		int i;
-
+		//共享的方式...对于非线性数据...
 		for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
 			skb_shinfo(n)->frags[i] = skb_shinfo(skb)->frags[i];
 			get_page(skb_shinfo(n)->frags[i].page);
 		}
 		skb_shinfo(n)->nr_frags = i;
 	}
-
+	//如果有分片的话..
 	if (skb_shinfo(skb)->frag_list) {
 		skb_shinfo(n)->frag_list = skb_shinfo(skb)->frag_list;
 		skb_clone_fraglist(n);
@@ -1326,7 +1331,7 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 		goto fault;
 
 	/* Copy header. */
-	/*拷贝在本页中的部分*/
+	//拷贝线性数据区.
 	if ((copy = start - offset) > 0) {
 		if (copy > len)
 			copy = len;

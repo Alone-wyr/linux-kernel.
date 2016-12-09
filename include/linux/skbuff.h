@@ -319,14 +319,15 @@ typedef unsigned char *sk_buff_data_t;
 */
 struct sk_buff {
 	/* These two members must be first. */
+		//如果有分片...使用这2个字段给链接一起..
 	struct sk_buff		*next;
 	struct sk_buff		*prev;
-
+		//指向报文所属的套接字..
 	struct sock		*sk;
-	//时间戳...一般用来记录接收到数据包的时间。
+		//时间戳...一般用来记录接收到数据包的时间。
 	ktime_t			tstamp;
-	//作为接受的数据包..记录入口接口...
-	//作为发送的数据包..记录出口接口...
+		//作为接受的数据包..记录入口接口...
+		//作为发送的数据包..记录出口接口...
 	struct net_device	*dev;
 
 	union {
@@ -345,11 +346,12 @@ struct sk_buff {
 	 //控制缓冲区...controlbuffer...
 	char			cb[48];
 /*
-len:
-缓冲区的数据区的大小...它是动态变化的...在协议栈往下时候它会递增,
-协议栈往上的时候它会减小,,,它指定的大小是包含协议头的.!
-data_len:
-它指的是片段的数据大小.
+data_len: 它指的是片段的数据大小.
+len 代表整个数据区域的长度！skb的组成是有sk_buff控制 + 线性数据 + 非线性数据 (skb_shared_info) 组成！
+	在sk_buff这个里面没有实际的数据，这里仅仅是控制信息，数据是通过后面的data指针指向其他内
+	存块的！那个内存块中是线性数据和非线性数据！
+	那么len就是length(线性数据) + length(非线性数据)！！！
+	data_len: 指的是length(非线性数据)！！！那么可以知道：length(线性数据) =  skb->len - skb->data_len
 */
 	unsigned int		len, data_len;
 /*
@@ -1062,14 +1064,9 @@ static inline int skb_is_nonlinear(const struct sk_buff *skb)
 	return skb->data_len;
 }
 /*
-someone else's tips:
-其中skb->len是数据包长度，在IPv4中就是单个完整IP包的总长，
-但这些数据并不一定都在当前内存页；skb->data_len表示在其他页的数据长度
-（包括本skb在其他页中的数据以及分片skb中的数据），因此skb->len - skb->data_len表示
-在当前页的数据大小。
-如果skb->data_len不为0，表示该IP包的数据分属不同的页，该数据包也就被成为非线性化的，
-函数skb_is_nonlinear()就是通过该参数判断，一般刚进行完碎片重组的skb包就属于此类。
-
+len指的是线性长度和非线性长度的总和...
+data_len是指非线性长度大小...
+这个内联函数就是返回线性长度哦.
 */
 static inline unsigned int skb_headlen(const struct sk_buff *skb)
 {
@@ -1221,6 +1218,7 @@ static inline int skb_tailroom(const struct sk_buff *skb)
  *	Increase the headroom of an empty &sk_buff by reducing the tail
  *	room. This is only allowed for an empty buffer.
  */
+ //一般在alloc_skb之后..为分配headroom...而调用的啦.
 static inline void skb_reserve(struct sk_buff *skb, int len)
 {
 	skb->data += len;

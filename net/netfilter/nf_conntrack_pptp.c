@@ -209,7 +209,9 @@ static int exp_gre(struct nf_conn *ct, __be16 callid, __be16 peer_callid)
 	exp_reply = nf_ct_expect_alloc(ct);
 	if (exp_reply == NULL)
 		goto out_put_orig;
-
+	/*
+		添加2个方向上的...gre协议的期待连接...
+	*/
 	/* original direction, PNS->PAC */
 	dir = IP_CT_DIR_ORIGINAL;
 	nf_ct_expect_init(exp_orig, NF_CT_EXPECT_CLASS_DEFAULT,
@@ -497,9 +499,7 @@ static const unsigned int pptp_msg_size[] = {
 };
 
 /* track caller id inside control connection, call expect_related */
-static int
-conntrack_pptp_help(struct sk_buff *skb, unsigned int protoff,
-		    struct nf_conn *ct, enum ip_conntrack_info ctinfo)
+static int conntrack_pptp_help(struct sk_buff *skb, unsigned int protoff, struct nf_conn *ct, enum ip_conntrack_info ctinfo)
 
 {
 	int dir = CTINFO2DIR(ctinfo);
@@ -517,8 +517,7 @@ conntrack_pptp_help(struct sk_buff *skb, unsigned int protoff,
 	u_int16_t msg;
 
 	/* don't do any tracking before tcp handshake complete */
-	if (ctinfo != IP_CT_ESTABLISHED &&
-	    ctinfo != IP_CT_ESTABLISHED + IP_CT_IS_REPLY)
+	if (ctinfo != IP_CT_ESTABLISHED && ctinfo != IP_CT_ESTABLISHED + IP_CT_IS_REPLY)
 		return NF_ACCEPT;
 
 	nexthdr_off = protoff;
@@ -568,12 +567,10 @@ conntrack_pptp_help(struct sk_buff *skb, unsigned int protoff,
 	 * established from PNS->PAC.  However, RFC makes no guarantee */
 	if (dir == IP_CT_DIR_ORIGINAL)
 		/* client -> server (PNS -> PAC) */
-		ret = pptp_outbound_pkt(skb, ctlh, pptpReq, reqlen, ct,
-					ctinfo);
+		ret = pptp_outbound_pkt(skb, ctlh, pptpReq, reqlen, ct, ctinfo);
 	else
 		/* server -> client (PAC -> PNS) */
-		ret = pptp_inbound_pkt(skb, ctlh, pptpReq, reqlen, ct,
-				       ctinfo);
+		ret = pptp_inbound_pkt(skb, ctlh, pptpReq, reqlen, ct, ctinfo);
 	pr_debug("sstate: %d->%d, cstate: %d->%d\n",
 		 oldsstate, info->sstate, oldcstate, info->cstate);
 	spin_unlock_bh(&nf_pptp_lock);
@@ -590,6 +587,7 @@ static const struct nf_conntrack_expect_policy pptp_exp_policy = {
 static struct nf_conntrack_helper pptp __read_mostly = {
 	.name			= "pptp",
 	.me			= THIS_MODULE,
+	//端口为1723的数据流属于期待连接..
 	.tuple.src.l3num	= AF_INET,
 	.tuple.src.u.tcp.port	= cpu_to_be16(PPTP_CONTROL_PORT),
 	.tuple.dst.protonum	= IPPROTO_TCP,
