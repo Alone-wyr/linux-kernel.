@@ -481,8 +481,7 @@ int net_assign_generic(struct net *net, int id, void *data)
 	if (old_ng->len >= id)
 		goto assign;
 
-	ng = kzalloc(sizeof(struct net_generic) +
-			id * sizeof(void *), GFP_KERNEL);
+	ng = kzalloc(sizeof(struct net_generic) + id * sizeof(void *), GFP_KERNEL);
 	if (ng == NULL)
 		return -ENOMEM;
 

@@ -381,6 +381,8 @@ lookup_protocol:
 	sk_refcnt_debug_inc(sk);
 
 	if (inet->num) {
+		//上面可以知道..num不为0的情况是因为创建socket的时候设置的type为SOCK_RAW..
+		//而且num被设置成protocol...
 		/* It assumes that any protocol which allows
 		 * the user to assign a number at socket
 		 * creation time automatically

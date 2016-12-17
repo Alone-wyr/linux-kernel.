@@ -211,6 +211,8 @@ static int exp_gre(struct nf_conn *ct, __be16 callid, __be16 peer_callid)
 		goto out_put_orig;
 	/*
 		添加2个方向上的...gre协议的期待连接...
+		下面的信息分别是源ip/目的ip/协议/还有可以认为是端口!!源端口和目的端口!!
+		添加两个是因为.服务器也可能主动连接到内网的客户端吗?...我不知道..猜测..也许是吧..
 	*/
 	/* original direction, PNS->PAC */
 	dir = IP_CT_DIR_ORIGINAL;
@@ -229,7 +231,7 @@ static int exp_gre(struct nf_conn *ct, __be16 callid, __be16 peer_callid)
 			  &ct->tuplehash[dir].tuple.dst.u3,
 			  IPPROTO_GRE, &callid, &peer_callid);
 	exp_reply->expectfn = pptp_expectfn;
-
+	//nf_nat_pptp_hook_exp_gre = pptp_exp_gre
 	nf_nat_pptp_exp_gre = rcu_dereference(nf_nat_pptp_hook_exp_gre);
 	if (nf_nat_pptp_exp_gre && ct->status & IPS_NAT_MASK)
 		nf_nat_pptp_exp_gre(exp_orig, exp_reply);
@@ -302,8 +304,7 @@ pptp_inbound_pkt(struct sk_buff *skb,
 		/* server accepted call, we now expect GRE frames */
 		if (info->sstate != PPTP_SESSION_CONFIRMED)
 			goto invalid;
-		if (info->cstate != PPTP_CALL_OUT_REQ &&
-		    info->cstate != PPTP_CALL_OUT_CONF)
+		if (info->cstate != PPTP_CALL_OUT_REQ && info->cstate != PPTP_CALL_OUT_CONF)
 			goto invalid;
 
 		cid = pptpReq->ocack.callID;
@@ -429,8 +430,7 @@ pptp_outbound_pkt(struct sk_buff *skb,
 
 	case PPTP_IN_CALL_REPLY:
 		/* client answers incoming call */
-		if (info->cstate != PPTP_CALL_IN_REQ &&
-		    info->cstate != PPTP_CALL_IN_REP)
+		if (info->cstate != PPTP_CALL_IN_REQ && info->cstate != PPTP_CALL_IN_REP)
 			goto invalid;
 
 		cid = pptpReq->icack.callID;
@@ -571,8 +571,7 @@ static int conntrack_pptp_help(struct sk_buff *skb, unsigned int protoff, struct
 	else
 		/* server -> client (PAC -> PNS) */
 		ret = pptp_inbound_pkt(skb, ctlh, pptpReq, reqlen, ct, ctinfo);
-	pr_debug("sstate: %d->%d, cstate: %d->%d\n",
-		 oldsstate, info->sstate, oldcstate, info->cstate);
+	pr_debug("sstate: %d->%d, cstate: %d->%d\n", oldsstate, info->sstate, oldcstate, info->cstate);
 	spin_unlock_bh(&nf_pptp_lock);
 
 	return ret;

@@ -27,10 +27,13 @@ enum pptp_ctrlcall_state {
 	PPTP_CALL_CLEAR_REQ,
 };
 
-/* conntrack private data */
+/* conntrack private data 
+下面说的NAT转换..是在函数pptp_outbound_pkt里面完成的!!!
+*/
 struct nf_ct_pptp_master {
 	enum pptp_ctrlsess_state sstate;	/* session state */
 	enum pptp_ctrlcall_state cstate;	/* call state */
+//存放的是经过NAT转换后的id....
 	__be16 pac_call_id;			/* call id of PAC */
 	__be16 pns_call_id;			/* call id of PNS */
 
@@ -38,7 +41,7 @@ struct nf_ct_pptp_master {
 	 * and therefore imposes a fixed limit on the number of maps */
 	struct nf_ct_gre_keymap *keymap[IP_CT_DIR_MAX];
 };
-
+//存放的是original的id ..
 struct nf_nat_pptp {
 	__be16 pns_call_id;			/* NAT'ed PNS call id */
 	__be16 pac_call_id;			/* NAT'ed PAC call id */

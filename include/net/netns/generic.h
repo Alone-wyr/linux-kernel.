@@ -23,7 +23,8 @@
  * After accomplishing all of the above, the private pointer can be
  * accessed with the net_generic() call.
  */
-
+//len记录ptr数据项的数目...
+//函数net_assign_generic的调用就是来设置ptr[]指向数据..
 struct net_generic {
 	unsigned int len;
 	struct rcu_head rcu;

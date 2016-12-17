@@ -27,6 +27,7 @@
 
 struct ip_tunnel_parm
 {
+	//设置为所属的dev的name啦!!
 	char			name[IFNAMSIZ];
 	int			link;
 	__be16			i_flags;

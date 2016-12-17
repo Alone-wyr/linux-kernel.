@@ -81,7 +81,11 @@
 static struct raw_hashinfo raw_v4_hashinfo = {
 	.lock = __RW_LOCK_UNLOCKED(raw_v4_hashinfo.lock),
 };
-
+/*
+该函数在调用socket函数,type设置为RAW的时候会调用..设置num字段为参数protocol..
+并且函数计算hash值是根据num字段来计算的...可见相同的protocol会得到相同的head...
+因此就是把相同的protocol放到同一个bucket里面.!!!
+*/
 void raw_hash_sk(struct sock *sk)
 {
 	struct raw_hashinfo *h = sk->sk_prot->h.raw_hash;

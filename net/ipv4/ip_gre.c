@@ -538,8 +538,9 @@ static int ipgre_rcv(struct sk_buff *skb)
 
 	if (!pskb_may_pull(skb, 16))
 		goto drop_nolock;
-
+	//内层的ip header....就是tunnel的ip地址了.
 	iph = ip_hdr(skb);
+	//data是传输层的数据...也就是gre的头...
 	h = skb->data;
 	flags = *(__be16*)h;
 
@@ -649,7 +650,8 @@ static int ipgre_rcv(struct sk_buff *skb)
 
 		skb_reset_network_header(skb);
 		ipgre_ecn_decapsulate(iph, skb);
-
+		//这里是最重要的...gre把数据包处理之后...再次把数据包处理一遍.!
+		//已经设置好了skb->protocol 和各个字段..(相当于重新获取一个数据包.)
 		netif_rx(skb);
 		read_unlock(&ipgre_lock);
 		return(0);
@@ -741,7 +743,8 @@ static int ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 			tos = old_iph->tos;
 		tos &= ~1;
 	}
-
+	
+	//这一段代码确定数据包的出口设备...(很重要).
 	{
 		struct flowi fl = { .oif = tunnel->parms.link,
 				    .nl_u = { .ip4_u =
@@ -813,7 +816,8 @@ static int ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	max_headroom = LL_RESERVED_SPACE(tdev) + gre_hlen;
-
+	//max_headroom是准备在head添加数据的长度...判断是否有足够的空间来容纳.
+	//判断skb是否shared..(因为要修改skb了)...等等...
 	if (skb_headroom(skb) < max_headroom || skb_shared(skb)||
 	    (skb_cloned(skb) && !skb_clone_writable(skb, 0))) {
 		struct sk_buff *new_skb = skb_realloc_headroom(skb, max_headroom);
@@ -830,24 +834,24 @@ static int ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		skb = new_skb;
 		old_iph = ip_hdr(skb);
 	}
-
+	//冲洗设置传输层和网络层的header..
 	skb_reset_transport_header(skb);
 	skb_push(skb, gre_hlen);
 	skb_reset_network_header(skb);
 	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
-	IPCB(skb)->flags &= ~(IPSKB_XFRM_TUNNEL_SIZE | IPSKB_XFRM_TRANSFORMED |
-			      IPSKB_REROUTED);
+	IPCB(skb)->flags &= ~(IPSKB_XFRM_TUNNEL_SIZE | IPSKB_XFRM_TRANSFORMED | IPSKB_REROUTED);
 	dst_release(skb->dst);
 	skb->dst = &rt->u.dst;
 
 	/*
 	 *	Push down and install the IPIP header.
 	 */
-
+	//填充一个新的ip header...
 	iph 			=	ip_hdr(skb);
 	iph->version		=	4;
 	iph->ihl		=	sizeof(struct iphdr) >> 2;
 	iph->frag_off		=	df;
+	//表明后面的payload为gre协议的!!很重要.
 	iph->protocol		=	IPPROTO_GRE;
 	iph->tos		=	ipgre_ecn_encapsulate(tos, old_iph, skb);
 	iph->daddr		=	rt->rt_dst;
@@ -887,7 +891,8 @@ static int ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	nf_reset(skb);
-
+	//下面这个函数很重要...它根据新构造的ip header..然后在重新执行发送.
+	//这下就会把数据包从真实的设备中发送出去!!(再去经过一次ip层.)
 	IPTUNNEL_XMIT();
 	tunnel->recursion--;
 	return 0;
@@ -1284,6 +1289,7 @@ static void ipgre_fb_tunnel_init(struct net_device *dev)
 	tunnel->hlen		= sizeof(struct iphdr) + 4;
 
 	dev_hold(dev);
+	//#define tunnels_wc	tunnels[0]  
 	ign->tunnels_wc[0]	= tunnel;
 }
 
@@ -1317,13 +1323,14 @@ static int ipgre_init_net(struct net *net)
 	ign = kzalloc(sizeof(struct ipgre_net), GFP_KERNEL);
 	if (ign == NULL)
 		goto err_alloc;
-
+	//ipgre_net_id作为数据项下标..可以找到ign..!!!具体查看函数内部的实现.
 	err = net_assign_generic(net, ipgre_net_id, ign);
 	if (err < 0)
 		goto err_assign;
-
-	ign->fb_tunnel_dev = alloc_netdev(sizeof(struct ip_tunnel), "gre0",
-					   ipgre_tunnel_setup);
+		//分配struct net_device结构体..同时后面接着 struct ip_tunnel...
+		//下面也是一个通用接口...根据参数确定是否分配一个private区域接在net_device后面...
+		//也有提供一个通用接口来获取private区域..那就是:netdev_priv函数.
+	ign->fb_tunnel_dev = alloc_netdev(sizeof(struct ip_tunnel), "gre0", ipgre_tunnel_setup);
 	if (!ign->fb_tunnel_dev) {
 		err = -ENOMEM;
 		goto err_alloc_dev;

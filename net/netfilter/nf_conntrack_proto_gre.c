@@ -115,8 +115,7 @@ int nf_ct_gre_keymap_add(struct nf_conn *ct, enum ip_conntrack_dir dir,
 			}
 		}
 		read_unlock_bh(&net_gre->keymap_lock);
-		pr_debug("trying to override keymap_%s for ct %p\n",
-			 dir == IP_CT_DIR_REPLY ? "reply" : "orig", ct);
+		pr_debug("trying to override keymap_%s for ct %p\n", dir == IP_CT_DIR_REPLY ? "reply" : "orig", ct);
 		return -EEXIST;
 	}
 

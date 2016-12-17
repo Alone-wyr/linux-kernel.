@@ -134,7 +134,12 @@ pptp_outbound_pkt(struct sk_buff *skb,
 		 * here.  current netfilter NAT core is not able to do
 		 * this :( For now we use TCP source port. This breaks
 		 * multiple calls within one control session */
-
+		/*
+			这里是特别重要的!!!服务器返回该type的数据包...里面包含着之间GRE通信的call id和peer call id..可以认为
+			是之间通信的端口...客户端的端口是在服务器分配的..这的pns_call_id..
+			因为需要做NAT转换...这里把申请的的call id (original call ID)保存起来...然后使用pptp的TCP连接的源端口号作为
+			call id 返回..对于TCP连接的端口号...也是在当前路由器作为唯一存在的!!
+		*/
 		/* save original call ID in nat_info */
 		nat_pptp_info->pns_call_id = ct_pptp_info->pns_call_id;
 
@@ -170,8 +175,7 @@ pptp_outbound_pkt(struct sk_buff *skb,
 
 	/* only OUT_CALL_REQUEST, IN_CALL_REPLY, CALL_CLEAR_REQUEST pass
 	 * down to here */
-	pr_debug("altering call id from 0x%04x to 0x%04x\n",
-		 ntohs(REQ_CID(pptpReq, cid_off)), ntohs(new_callid));
+	pr_debug("altering call id from 0x%04x to 0x%04x\n", ntohs(REQ_CID(pptpReq, cid_off)), ntohs(new_callid));
 
 	/* mangle packet */
 	if (nf_nat_mangle_tcp_packet(skb, ct, ctinfo,
@@ -184,8 +188,7 @@ pptp_outbound_pkt(struct sk_buff *skb,
 }
 
 static void
-pptp_exp_gre(struct nf_conntrack_expect *expect_orig,
-	     struct nf_conntrack_expect *expect_reply)
+pptp_exp_gre(struct nf_conntrack_expect *expect_orig, struct nf_conntrack_expect *expect_reply)
 {
 	const struct nf_conn *ct = expect_orig->master;
 	struct nf_ct_pptp_master *ct_pptp_info;
